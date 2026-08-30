@@ -1,8 +1,8 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-   Name = "BSS Reworked - Pro Hub",
-   LoadingTitle = "Đang tải hệ thống...",
+   Name = "BSS Reworked - Pro Hub V2",
+   LoadingTitle = "Đang cập nhật...",
    LoadingSubtitle = "By Gemini",
    ConfigurationSaving = { Enabled = false }
 })
@@ -26,7 +26,7 @@ FarmTab:CreateToggle({
 })
 
 FarmTab:CreateToggle({
-   Name = "Tự đi bộ nhặt Item rơi",
+   Name = "Tự đi bộ nhặt Item rơi (V2)",
    CurrentValue = false,
    Flag = "WalkToggle",
    Callback = function(Value)
@@ -45,30 +45,35 @@ task.spawn(function()
     end
 end)
 
--- Vòng lặp tự đi bộ nhặt item
+-- Vòng lặp quét và tự đi nhặt item (Đã tối ưu hóa cho game fan-made)
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait(0.2) do
         if _G.AutoCollect then
             pcall(function()
                 local char = player.Character
                 if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
                     local root = char.HumanoidRootPart
                     local hum = char.Humanoid
-                    local targetItem = nil
-                    local shortestDist = 70
+                    local targetPos = nil
+                    local shortestDist = 50 -- Bán kính vừa phải để tránh chạy loạn xạ
                     
+                    -- Tìm kiếm các item/token đang rơi xung quanh nhân vật
                     for _, v in pairs(workspace:GetDescendants()) do
-                        if v:IsA("BasePart") and v:FindFirstChild("TouchInterest") and not v.Parent:FindFirstChild("Humanoid") then
-                            local dist = (v.Position - root.Position).Magnitude
-                            if dist < shortestDist then
-                                shortestDist = dist
-                                targetItem = v
+                        if v:IsA("BasePart") then
+                            -- Kiểm tra xem vật thể có chứa TouchInterest (tương tác chạm) hoặc thuộc thư mục chứa đồ rơi
+                            if v:FindFirstChild("TouchInterest") and not v.Parent:FindFirstChild("Humanoid") then
+                                local dist = (v.Position - root.Position).Magnitude
+                                if dist < shortestDist then
+                                    shortestDist = dist
+                                    targetPos = v.Position
+                                end
                             end
                         end
                     end
                     
-                    if targetItem then 
-                        hum:MoveTo(targetItem.Position) 
+                    -- Ra lệnh nhân vật di chuyển tới vị trí item
+                    if targetPos then 
+                        hum:MoveTo(targetPos) 
                     end
                 end
             end)
