@@ -3,28 +3,15 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
    Name = "Macroware Style - Bee Swarm Hub",
    LoadingTitle = "Đang tải hệ thống Macro...",
-   LoadingSubtitle = "By Custom Build",
-   ConfigurationSaving = {
-      Enabled = true,
-      FolderName = "MacrowareConfig",
-      FileName = "BSS_Settings"
-   },
-   Discord = {
-      Enabled = false,
-      Invite = "noinvitelink",
-      RememberJoins = true
-   },
-   KeySystem = false,
+   LoadingSubtitle = "Fix Auto Collect",
+   ConfigurationSaving = { Enabled = false }
 })
 
 local player = game.Players.LocalPlayer
 local vim = game:GetService("VirtualInputManager")
 
--- Trạng thái tính năng
-_G.AutoFarm = false
 _G.AutoDig = false
 _G.AutoCollect = false
-_G.AutoSprinkler = false
 local currentField = "Sunflower Field"
 
 -- ================= TAB 1: AUTO FARM =================
@@ -48,8 +35,6 @@ FarmTab:CreateDropdown({
               if fieldPart then
                   root.CFrame = fieldPart.CFrame + Vector3.new(0, 5, 0)
                   Rayfield:Notify({Title = "Dịch chuyển", Content = "Đã đến: " .. currentField, Duration = 3})
-              else
-                  Rayfield:Notify({Title = "Thông báo", Content = "Đã lưu lựa chọn cánh đồng!", Duration = 3})
               end
           end
       end)
@@ -66,7 +51,7 @@ FarmTab:CreateToggle({
 })
 
 FarmTab:CreateToggle({
-   Name = "Bật Tự Động Nhặt Token & Item",
+   Name = "Bật Tự Động Nhặt Token & Item (Đã Fix)",
    CurrentValue = false,
    Flag = "CollectToggle",
    Callback = function(Value)
@@ -74,11 +59,11 @@ FarmTab:CreateToggle({
    end,
 })
 
--- ================= TAB 2: MISC & UTILITIES =================
+-- ================= TAB 2: TIỆN ÍCH =================
 local MiscTab = Window:CreateTab("Tiện ích", nil)
 
 MiscTab:CreateButton({
-   Name = "Kích hoạt Anti-AFK (Chống văng game)",
+   Name = "Kích hoạt Anti-AFK (Chống văng)",
    Callback = function()
        local vu = game:GetService("VirtualUser")
        player.Idled:Connect(function()
@@ -86,30 +71,72 @@ MiscTab:CreateButton({
            task.wait(1)
            vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
        end)
-       Rayfield:Notify({Title = "Thành công", Content = "Đã bật chế độ chống AFK!", Duration = 3})
+       Rayfield:Notify({Title = "Thành công", Content = "Đã bật chống AFK!", Duration = 3})
    end,
 })
 
 MiscTab:CreateButton({
-   Name = "Tắt Đồ Họa 3D (Tăng FPS / Giảm lag)",
+   Name = "Tắt Đồ Họa 3D (Siêu mượt)",
    Callback = function()
        game:GetService("RunService"):Set3dRenderingEnabled(false)
-       Rayfield:Notify({Title = "Đồ họa", Content = "Đã tắt hiển thị 3D để cày mượt hơn.", Duration = 3})
    end,
 })
 
-MiscTab:CreateButton({
-   Name = "Bật Lại Đồ Họa 3D",
-   Callback = function()
-       game:GetService("RunService"):Set3dRenderingEnabled(true)
-       Rayfield:Notify({Title = "Đồ họa", Content = "Đã bật lại đồ họa.", Duration = 3})
-   end,
-})
+-- ================= CÁC VÒNG LẶP XỬ LÝ =================
 
--- ================= CÁC VÒNG LẶP XỬ LÝ (BACKEND LOGIC) =================
-
--- Vòng lặp xử lý Auto Dig (Vung gậy liên tục)
+-- Vòng lặp Auto Dig
 task.spawn(function()
+    while task.wait(0.1) do
+        if _G.AutoDig then
+            pcall(function()
+                vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                task.wait(0.05)
+                vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+            end)
+        end
+    end
+end)
+
+-- Vòng lặp quét Token / Item chuẩn xác cho BSS
+task.spawn(function()
+    while task.wait(0.15) do
+        if _G.AutoCollect then
+            pcall(function()
+                local char = player.Character
+                if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
+                    local root = char.HumanoidRootPart
+                    local hum = char.Humanoid
+                    local targetPos = nil
+                    local minDistance = 80 -- Tăng phạm vi quét rộng hơn
+                    
+                    -- Tìm kiếm trong các thư mục lưu token thường gặp của BSS
+                    local foldersToCheck = {workspace, workspace:FindFirstChild("Collectibles"), workspace:FindFirstChild("Tokens")}
+                    for _, folder in pairs(foldersToCheck) do
+                        if folder then
+                            for _, obj in pairs(folder:GetChildren()) do
+                                -- Nhận diện token qua tên hoặc qua cấu trúc phần thưởng rơi
+                                if obj.Name == "Token" or obj:IsA("BasePart") or obj:IsA("Model") then
+                                    local part = obj:IsA("Model") and obj.PrimaryPart or obj
+                                    if part and part:IsA("BasePart") then
+                                        local dist = (part.Position - root.Position).Magnitude
+                                        if dist < minDistance then
+                                            minDistance = dist
+                                            targetPos = part.Position
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    
+                    if targetPos then
+                        hum:MoveTo(targetPos)
+                    end
+                end
+            end)
+        end
+    end
+end)
     while task.wait(0.1) do
         if _G.AutoDig then
             pcall(function()
