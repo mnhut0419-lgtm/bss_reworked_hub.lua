@@ -1,0 +1,111 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "BSS Reworked - Pro Hub",
+   LoadingTitle = "Đang tải hệ thống...",
+   LoadingSubtitle = "By Gemini",
+   ConfigurationSaving = { Enabled = false }
+})
+
+local player = game.Players.LocalPlayer
+local vim = game:GetService("VirtualInputManager")
+
+_G.AutoClick = false
+_G.AutoCollect = false
+
+-- TAB CÀY CUỐC
+local FarmTab = Window:CreateTab("Cày Cuốc", nil)
+
+FarmTab:CreateToggle({
+   Name = "Bật Auto Click (Vung gậy)",
+   CurrentValue = false,
+   Flag = "ClickToggle",
+   Callback = function(Value)
+       _G.AutoClick = Value
+   end,
+})
+
+FarmTab:CreateToggle({
+   Name = "Tự đi bộ nhặt Item rơi",
+   CurrentValue = false,
+   Flag = "WalkToggle",
+   Callback = function(Value)
+       _G.AutoCollect = Value
+   end,
+})
+
+-- Vòng lặp Auto Click
+task.spawn(function()
+    while task.wait(0.1) do
+        if _G.AutoClick then
+            vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+            task.wait(0.05)
+            vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+        end
+    end
+end)
+
+-- Vòng lặp tự đi bộ nhặt item
+task.spawn(function()
+    while task.wait(0.1) do
+        if _G.AutoCollect then
+            pcall(function()
+                local char = player.Character
+                if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
+                    local root = char.HumanoidRootPart
+                    local hum = char.Humanoid
+                    local targetItem = nil
+                    local shortestDist = 70
+                    
+                    for _, v in pairs(workspace:GetDescendants()) do
+                        if v:IsA("BasePart") and v:FindFirstChild("TouchInterest") and not v.Parent:FindFirstChild("Humanoid") then
+                            local dist = (v.Position - root.Position).Magnitude
+                            if dist < shortestDist then
+                                shortestDist = dist
+                                targetItem = v
+                            end
+                        end
+                    end
+                    
+                    if targetItem then 
+                        hum:MoveTo(targetItem.Position) 
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- TAB TỐI ƯU & CHỐNG VĂNG
+local MiscTab = Window:CreateTab("Tối Ưu", nil)
+
+MiscTab:CreateButton({
+   Name = "Kích hoạt Anti-AFK (Chống văng)",
+   Callback = function()
+       local vu = game:GetService("VirtualUser")
+       player.Idled:Connect(function()
+           vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+           task.wait(1)
+           vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+       end)
+       Rayfield:Notify({
+           Title = "Thành công",
+           Content = "Đã bật chống AFK!",
+           Duration = 3,
+       })
+   end,
+})
+
+MiscTab:CreateButton({
+   Name = "Tắt Đồ Họa 3D (Siêu mượt / Cắm máy)",
+   Callback = function()
+       game:GetService("RunService"):Set3dRenderingEnabled(false)
+   end,
+})
+
+MiscTab:CreateButton({
+   Name = "Bật Lại Đồ Họa 3D",
+   Callback = function()
+       game:GetService("RunService"):Set3dRenderingEnabled(true)
+   end,
+})
