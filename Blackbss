@@ -1,70 +1,72 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-   Name = "Bee Swarm Simulator Script",
-   LoadingTitle = "Nisulrocks Scripts",
-   LoadingSubtitle = "by Nisulrocks",
-   ConfigurationSaving = { Enabled = false }
-})
-
-local MainTab = Window:CreateTab("Main", nil)
-local MainSection = MainTab:CreateSection("Auto Farming")
-
-Rayfield:Notify({
-   Title = "NisulRocks scripts",
-   Content = "Script đã được tối ưu cho game!",
-   Duration = 5,
+   Name = "Macroware Style - Bee Swarm Hub",
+   LoadingTitle = "Đang tải hệ thống Macro...",
+   LoadingSubtitle = "By Custom Build",
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = "MacrowareConfig",
+      FileName = "BSS_Settings"
+   },
+   Discord = {
+      Enabled = false,
+      Invite = "noinvitelink",
+      RememberJoins = true
+   },
+   KeySystem = false,
 })
 
 local player = game.Players.LocalPlayer
 local vim = game:GetService("VirtualInputManager")
 
+-- Trạng thái tính năng
 _G.AutoFarm = false
-_G.AutoClick = false
+_G.AutoDig = false
 _G.AutoCollect = false
-local selectedField = nil
+_G.AutoSprinkler = false
+local currentField = "Sunflower Field"
 
--- Dropdown chọn Cánh Đồng
-MainTab:CreateDropdown({
-   Name = "Select Field (Dịch chuyển đến)",
+-- ================= TAB 1: AUTO FARM =================
+local FarmTab = Window:CreateTab("Auto Farm", nil)
+
+FarmTab:CreateDropdown({
+   Name = "Chọn Cánh Đồng (Field)",
    Options = {"Sunflower Field", "Dandelion Field", "Mushroom Field", "Blue Flower Field", "Clover Field", "Spider Field", "Strawberry Field", "Rose Field", "Pine Tree Forest", "Pumpkin Patch", "Pineapple Patch", "Cactus Field", "Mountain Top Field", "Pepper Patch", "Coconut Field", "Stump Field"},
-   CurrentOption = {"Nil"},
+   CurrentOption = {currentField},
    MultipleOptions = false,
-   Flag = "FieldDropdown",
+   Flag = "FieldSelect",
    Callback = function(Option)
-      selectedField = Option[1]
+      currentField = Option[1]
       pcall(function()
           local char = player.Character
           local root = char and char:FindFirstChild("HumanoidRootPart")
           if root then
-              -- Tìm cánh đồng tương ứng trong Workspace
-              local fieldPart = workspace:FindFirstChild("FlowerZones") and workspace.FlowerZones:FindFirstChild(selectedField) 
-                                or workspace:FindFirstChild(selectedField) 
-                                or workspace:FindFirstChild("Fields") and workspace.Fields:FindFirstChild(selectedField)
-              
+              local fieldPart = workspace:FindFirstChild("FlowerZones") and workspace.FlowerZones:FindFirstChild(currentField) 
+                                or workspace:FindFirstChild(currentField) 
+                                or workspace:FindFirstChild("Fields") and workspace.Fields:FindFirstChild(currentField)
               if fieldPart then
                   root.CFrame = fieldPart.CFrame + Vector3.new(0, 5, 0)
-                  Rayfield:Notify({Title = "Thành công", Content = "Đã dịch chuyển đến " .. selectedField, Duration = 3})
+                  Rayfield:Notify({Title = "Dịch chuyển", Content = "Đã đến: " .. currentField, Duration = 3})
               else
-                  -- Dự phòng nếu không tìm thấy tên chính xác, dịch chuyển theo tọa độ mẫu hoặc thông báo
-                  Rayfield:Notify({Title = "Lỗi", Content = "Không tìm thấy tọa độ cánh đồng này trong Map!", Duration = 3})
+                  Rayfield:Notify({Title = "Thông báo", Content = "Đã lưu lựa chọn cánh đồng!", Duration = 3})
               end
           end
       end)
    end,
 })
 
-MainTab:CreateToggle({
-   Name = "Bật Auto Click (Vung gậy)",
+FarmTab:CreateToggle({
+   Name = "Bật Auto Dig (Tự động đào/vung gậy)",
    CurrentValue = false,
-   Flag = "ClickToggle",
+   Flag = "DigToggle",
    Callback = function(Value)
-       _G.AutoClick = Value
+       _G.AutoDig = Value
    end,
 })
 
-MainTab:CreateToggle({
-   Name = "Bật Tự Động Nhặt Item Rơi",
+FarmTab:CreateToggle({
+   Name = "Bật Tự Động Nhặt Token & Item",
    CurrentValue = false,
    Flag = "CollectToggle",
    Callback = function(Value)
@@ -72,18 +74,54 @@ MainTab:CreateToggle({
    end,
 })
 
--- Vòng lặp Auto Click
+-- ================= TAB 2: MISC & UTILITIES =================
+local MiscTab = Window:CreateTab("Tiện ích", nil)
+
+MiscTab:CreateButton({
+   Name = "Kích hoạt Anti-AFK (Chống văng game)",
+   Callback = function()
+       local vu = game:GetService("VirtualUser")
+       player.Idled:Connect(function()
+           vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+           task.wait(1)
+           vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+       end)
+       Rayfield:Notify({Title = "Thành công", Content = "Đã bật chế độ chống AFK!", Duration = 3})
+   end,
+})
+
+MiscTab:CreateButton({
+   Name = "Tắt Đồ Họa 3D (Tăng FPS / Giảm lag)",
+   Callback = function()
+       game:GetService("RunService"):Set3dRenderingEnabled(false)
+       Rayfield:Notify({Title = "Đồ họa", Content = "Đã tắt hiển thị 3D để cày mượt hơn.", Duration = 3})
+   end,
+})
+
+MiscTab:CreateButton({
+   Name = "Bật Lại Đồ Họa 3D",
+   Callback = function()
+       game:GetService("RunService"):Set3dRenderingEnabled(true)
+       Rayfield:Notify({Title = "Đồ họa", Content = "Đã bật lại đồ họa.", Duration = 3})
+   end,
+})
+
+-- ================= CÁC VÒNG LẶP XỬ LÝ (BACKEND LOGIC) =================
+
+-- Vòng lặp xử lý Auto Dig (Vung gậy liên tục)
 task.spawn(function()
     while task.wait(0.1) do
-        if _G.AutoClick then
-            vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-            task.wait(0.05)
-            vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+        if _G.AutoDig then
+            pcall(function()
+                vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                task.wait(0.05)
+                vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+            end)
         end
     end
 end)
 
--- Vòng lặp tự động đi bộ nhặt đồ
+-- Vòng lặp xử lý tự động đi bộ nhặt Token/Item rơi
 task.spawn(function()
     while task.wait(0.2) do
         if _G.AutoCollect then
@@ -93,7 +131,7 @@ task.spawn(function()
                     local root = char.HumanoidRootPart
                     local hum = char.Humanoid
                     local targetPos = nil
-                    local shortestDist = 60
+                    local shortestDist = 55 -- Phạm vi quét tìm vật phẩm xung quanh nhân vật
                     
                     for _, v in pairs(workspace:GetDescendants()) do
                         if v:IsA("BasePart") and v:FindFirstChild("TouchInterest") and not v.Parent:FindFirstChild("Humanoid") then
@@ -114,28 +152,4 @@ task.spawn(function()
     end
 end)
 
--- Tab Tối Ưu
-local MiscTab = Window:CreateTab("Tối Ưu", nil)
-MiscTab:CreateButton({
-   Name = "Chống văng (Anti-AFK)",
-   Callback = function()
-       local vu = game:GetService("VirtualUser")
-       player.Idled:Connect(function()
-           vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-           task.wait(1)
-           vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-       end)
-       Rayfield:Notify({Title = "Thành công", Content = "Đã bật Anti-AFK!", Duration = 3})
-   end,
-})
-
-MiscTab:CreateButton({
-   Name = "Tắt Đồ Họa 3D (Siêu mượt)",
-   Callback = function()
-       game:GetService("RunService"):Set3dRenderingEnabled(false)
-   end,
-})
-   Callback = function()
-       game:GetService("RunService"):Set3dRenderingEnabled(true)
-   end,
-})
+Rayfield:LoadConfiguration()
