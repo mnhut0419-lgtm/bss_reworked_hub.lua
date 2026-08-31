@@ -1,6 +1,6 @@
 --==============================================================
--- GARDEN COLLECTOR V4.1
--- Vung 4 goc + toc do + tu vung gay + nhac khong hoat dong
+-- ATLAS GARDEN COLLECTOR V4.2
+-- Menu tab gon + luu cau hinh trong phien + uu tien Totem
 -- Chi dung API Luau/Roblox tieu chuan.
 --==============================================================
 
@@ -46,6 +46,7 @@ local Config = {
     ReturnTimeout = 14,
     ReturnDistance = 5,
     VisitedCooldown = 12,
+    TotemVisitedCooldown = 25,
     FailedCooldown = 15,
     PatrolMoveTime = 4,
     PatrolSwitchDistance = 6,
@@ -58,6 +59,7 @@ local Config = {
     MinimumCornerSpacing = 4,
     MinimumZoneArea = 30,
     ShowZonePreview = true,
+    PrioritizeTotems = true,
 
     CollectibleTag = "Collectible",
     AttributeNames = {
@@ -507,6 +509,29 @@ local function hasCollectibleMarker(instance)
     return containsKeyword(instance.Name)
 end
 
+local function isTotemTarget(target)
+    local current = target
+
+    for _ = 1, 5 do
+        if not current or current == workspace then
+            break
+        end
+
+        local lowerName = string.lower(current.Name)
+
+        if string.find(lowerName, "totem", 1, true)
+            or current:GetAttribute("Totem") == true
+            or CollectionService:HasTag(current, "Totem")
+        then
+            return true
+        end
+
+        current = current.Parent
+    end
+
+    return false
+end
+
 local function resolveCollectible(part)
     local ancestor = part.Parent
 
@@ -584,6 +609,7 @@ local function getClosestTarget(rootPosition)
 
     local closestTarget = nil
     local closestDistance = math.huge
+    local closestPriority = math.huge
     local currentTime = os.clock()
 
     for target in pairs(Tracked) do
@@ -595,7 +621,16 @@ local function getClosestTarget(rootPosition)
 
             if position and isInsideZone(position, Config.TargetBoundaryTolerance) then
                 local distance = (position - rootPosition).Magnitude
-                if distance < closestDistance then
+                local priority = 1
+
+                if Config.PrioritizeTotems and isTotemTarget(target) then
+                    priority = 0
+                end
+
+                if priority < closestPriority
+                    or (priority == closestPriority and distance < closestDistance)
+                then
+                    closestPriority = priority
                     closestDistance = distance
                     closestTarget = target
                 end
@@ -690,7 +725,7 @@ local function walkThroughTarget(target, humanoid, root)
             local possibleGoal = targetPosition + difference.Unit * passThroughDistance
             if isInsideZone(possibleGoal, 0) then
                 movementGoal = possibleGoal
-            end
+        end
         end
 
         if not previousGoal or (movementGoal - previousGoal).Magnitude >= 0.75 then
@@ -719,6 +754,7 @@ local function walkThroughTarget(target, humanoid, root)
             if movedDistance < Config.StuckMovementThreshold then
                 return false
             end
+
             lastMovementCheckAt = now
             lastMovementCheckPosition = root.Position
         end
@@ -1064,11 +1100,311 @@ local idleAcknowledgeRound = Instance.new("UICorner")
 idleAcknowledgeRound.CornerRadius = UDim.new(0, 8)
 idleAcknowledgeRound.Parent = idleAcknowledgeButton
 
+--==============================================================
+-- BO CUC MENU TAB KIEU ATLAS
+--==============================================================
+
+frame.Size = UDim2.fromOffset(300, 285)
+frame.Position = UDim2.new(0.5, 0, 0, 20)
+title.Text = "ATLAS GARDEN"
+title.TextSize = 16
+
+openButton.Text = "ATLAS"
+openButton.TextSize = 10
+openButton.Size = UDim2.fromOffset(54, 54)
+
+local tabBar = Instance.new("Frame")
+tabBar.Position = UDim2.fromOffset(10, 40)
+tabBar.Size = UDim2.new(1, -20, 0, 30)
+tabBar.BackgroundTransparency = 1
+tabBar.Parent = frame
+
+local function createTabButton(text, positionScale)
+    local button = Instance.new("TextButton")
+    button.Position = UDim2.new(positionScale, 0, 0, 0)
+    button.Size = UDim2.new(1 / 3, -4, 1, 0)
+    button.BackgroundColor3 = Color3.fromRGB(55, 57, 67)
+    button.Text = text
+    button.TextColor3 = Color3.fromRGB(205, 205, 212)
+    button.Font = Enum.Font.GothamBold
+    button.TextSize = 11
+    button.Parent = tabBar
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 7)
+    corner.Parent = button
+
+    return button
+end
+
+local farmTabButton = createTabButton("FARM", 0)
+local zoneTabButton = createTabButton("KHU VUC", 1 / 3)
+local settingsTabButton = createTabButton("CAI DAT", 2 / 3)
+
+local function createPage()
+    local page = Instance.new("Frame")
+    page.Position = UDim2.fromOffset(10, 76)
+    page.Size = UDim2.new(1, -20, 0, 142)
+    page.BackgroundTransparency = 1
+    page.Visible = false
+    page.Parent = frame
+    return page
+end
+
+local farmPage = createPage()
+local zonePage = createPage()
+local settingsPage = createPage()
+
+toggleButton.Parent = farmPage
+toggleButton.Position = UDim2.fromOffset(0, 0)
+toggleButton.Size = UDim2.new(1, 0, 0, 38)
+
+autoSwingButton.Parent = farmPage
+autoSwingButton.Position = UDim2.fromOffset(0, 86)
+autoSwingButton.Size = UDim2.new(1, 0, 0, 34)
+autoSwingButton.TextSize = 11
+
+local priorityTotemButton = Instance.new("TextButton")
+priorityTotemButton.Position = UDim2.fromOffset(0, 45)
+priorityTotemButton.Size = UDim2.new(1, 0, 0, 34)
+priorityTotemButton.TextColor3 = Color3.new(1, 1, 1)
+priorityTotemButton.Font = Enum.Font.GothamBold
+priorityTotemButton.TextSize = 12
+priorityTotemButton.Parent = farmPage
+
+local priorityTotemRound = Instance.new("UICorner")
+priorityTotemRound.CornerRadius = UDim.new(0, 8)
+priorityTotemRound.Parent = priorityTotemButton
+
+local farmHint = Instance.new("TextLabel")
+farmHint.Position = UDim2.fromOffset(0, 123)
+farmHint.Size = UDim2.new(1, 0, 0, 17)
+farmHint.BackgroundTransparency = 1
+farmHint.Text = "Totem duoc chon truoc Token thuong"
+farmHint.TextColor3 = Color3.fromRGB(155, 158, 168)
+farmHint.Font = Enum.Font.Gotham
+farmHint.TextSize = 10
+farmHint.Parent = farmPage
+
+saveCornerButton.Parent = zonePage
+saveCornerButton.Position = UDim2.fromOffset(0, 0)
+saveCornerButton.Size = UDim2.fromOffset(190, 36)
+saveCornerButton.TextSize = 12
+
+resetButton.Parent = zonePage
+resetButton.Position = UDim2.fromOffset(196, 0)
+resetButton.Size = UDim2.fromOffset(84, 36)
+resetButton.TextSize = 12
+
+local saveConfigButton = Instance.new("TextButton")
+saveConfigButton.Position = UDim2.fromOffset(0, 44)
+saveConfigButton.Size = UDim2.fromOffset(136, 34)
+saveConfigButton.BackgroundColor3 = Color3.fromRGB(55, 135, 100)
+saveConfigButton.Text = "LUU CAU HINH"
+saveConfigButton.TextColor3 = Color3.new(1, 1, 1)
+saveConfigButton.Font = Enum.Font.GothamBold
+saveConfigButton.TextSize = 11
+saveConfigButton.Parent = zonePage
+
+local saveConfigRound = Instance.new("UICorner")
+saveConfigRound.CornerRadius = UDim.new(0, 8)
+saveConfigRound.Parent = saveConfigButton
+
+local loadConfigButton = Instance.new("TextButton")
+loadConfigButton.Position = UDim2.fromOffset(144, 44)
+loadConfigButton.Size = UDim2.fromOffset(136, 34)
+loadConfigButton.BackgroundColor3 = Color3.fromRGB(65, 110, 175)
+loadConfigButton.Text = "TAI CAU HINH"
+loadConfigButton.TextColor3 = Color3.new(1, 1, 1)
+loadConfigButton.Font = Enum.Font.GothamBold
+loadConfigButton.TextSize = 11
+loadConfigButton.Parent = zonePage
+
+local loadConfigRound = Instance.new("UICorner")
+loadConfigRound.CornerRadius = UDim.new(0, 8)
+loadConfigRound.Parent = loadConfigButton
+
+local zoneInfo = Instance.new("TextLabel")
+zoneInfo.Position = UDim2.fromOffset(0, 85)
+zoneInfo.Size = UDim2.new(1, 0, 0, 48)
+zoneInfo.BackgroundColor3 = Color3.fromRGB(40, 42, 51)
+zoneInfo.Text = "Luu du 4 goc, sau do bam LUU CAU HINH"
+zoneInfo.TextColor3 = Color3.fromRGB(190, 192, 202)
+zoneInfo.Font = Enum.Font.Gotham
+zoneInfo.TextSize = 11
+zoneInfo.TextWrapped = true
+zoneInfo.Parent = zonePage
+
+local zoneInfoRound = Instance.new("UICorner")
+zoneInfoRound.CornerRadius = UDim.new(0, 8)
+zoneInfoRound.Parent = zoneInfo
+
+speedModeButton.Parent = settingsPage
+speedModeButton.Position = UDim2.fromOffset(0, 0)
+speedModeButton.Size = UDim2.new(1, 0, 0, 31)
+speedModeButton.TextSize = 11
+
+speedLabel.Parent = settingsPage
+speedLabel.Position = UDim2.fromOffset(0, 35)
+speedLabel.Size = UDim2.new(1, 0, 0, 20)
+speedLabel.TextSize = 11
+
+minusButton.Parent = settingsPage
+minusButton.Position = UDim2.fromOffset(0, 62)
+minusButton.Size = UDim2.fromOffset(34, 32)
+
+speedTrack.Parent = settingsPage
+speedTrack.Position = UDim2.fromOffset(43, 74)
+speedTrack.Size = UDim2.fromOffset(194, 8)
+
+plusButton.Parent = settingsPage
+plusButton.Position = UDim2.fromOffset(246, 62)
+plusButton.Size = UDim2.fromOffset(34, 32)
+
+local previewToggleButton = Instance.new("TextButton")
+previewToggleButton.Position = UDim2.fromOffset(0, 103)
+previewToggleButton.Size = UDim2.new(1, 0, 0, 32)
+previewToggleButton.TextColor3 = Color3.new(1, 1, 1)
+previewToggleButton.Font = Enum.Font.GothamBold
+previewToggleButton.TextSize = 11
+previewToggleButton.Parent = settingsPage
+
+local previewToggleRound = Instance.new("UICorner")
+previewToggleRound.CornerRadius = UDim.new(0, 8)
+previewToggleRound.Parent = previewToggleButton
+
+status.Position = UDim2.fromOffset(10, 225)
+status.Size = UDim2.new(1, -20, 0, 50)
+status.TextSize = 10
+
+local tabButtons = {
+    Farm = farmTabButton,
+    Zone = zoneTabButton,
+    Settings = settingsTabButton,
+}
+
+local tabPages = {
+    Farm = farmPage,
+    Zone = zonePage,
+    Settings = settingsPage,
+}
+
+local function showTab(tabName)
+    for name, page in pairs(tabPages) do
+        local selected = name == tabName
+        page.Visible = selected
+        tabButtons[name].BackgroundColor3 = selected
+            and Color3.fromRGB(225, 165, 45)
+            or Color3.fromRGB(55, 57, 67)
+        tabButtons[name].TextColor3 = selected
+            and Color3.fromRGB(35, 32, 25)
+            or Color3.fromRGB(205, 205, 212)
+    end
+end
+
+farmTabButton.Activated:Connect(function()
+    showTab("Farm")
+end)
+
+zoneTabButton.Activated:Connect(function()
+    showTab("Zone")
+end)
+
+settingsTabButton.Activated:Connect(function()
+    showTab("Settings")
+end)
+
+showTab("Farm")
+
 local function stopMoving()
     local _, humanoid, root = getCharacter()
     if humanoid and root then
         humanoid:MoveTo(root.Position)
     end
+end
+
+local ConfigAttributePrefix = "AtlasGarden_"
+
+local function saveSessionConfig()
+    Player:SetAttribute(ConfigAttributePrefix .. "Version", 1)
+    Player:SetAttribute(ConfigAttributePrefix .. "WalkSpeed", Config.SelectedWalkSpeed)
+    Player:SetAttribute(ConfigAttributePrefix .. "CustomSpeed", Config.CustomSpeedEnabled)
+    Player:SetAttribute(ConfigAttributePrefix .. "PrioritizeTotems", Config.PrioritizeTotems)
+    Player:SetAttribute(ConfigAttributePrefix .. "AutoSwing", Config.AutoSwingEnabled)
+    Player:SetAttribute(ConfigAttributePrefix .. "ShowPreview", Config.ShowZonePreview)
+
+    for index = 1, 4 do
+        Player:SetAttribute(
+            ConfigAttributePrefix .. "Corner" .. index,
+            SavedCorners[index]
+        )
+    end
+
+    return #SavedCorners == 4 and ZoneValid
+end
+
+local function loadSessionConfig()
+    if Player:GetAttribute(ConfigAttributePrefix .. "Version") ~= 1 then
+        return false, false
+    end
+
+    local savedSpeed = Player:GetAttribute(ConfigAttributePrefix .. "WalkSpeed")
+    local savedCustomSpeed = Player:GetAttribute(ConfigAttributePrefix .. "CustomSpeed")
+    local savedPriority = Player:GetAttribute(ConfigAttributePrefix .. "PrioritizeTotems")
+    local savedAutoSwing = Player:GetAttribute(ConfigAttributePrefix .. "AutoSwing")
+    local savedPreview = Player:GetAttribute(ConfigAttributePrefix .. "ShowPreview")
+
+    if typeof(savedSpeed) == "number" then
+        Config.SelectedWalkSpeed = math.clamp(
+            savedSpeed,
+            Config.MinimumWalkSpeed,
+            Config.MaximumWalkSpeed
+        )
+    end
+
+    if typeof(savedCustomSpeed) == "boolean" then
+        Config.CustomSpeedEnabled = savedCustomSpeed
+    end
+
+    if typeof(savedPriority) == "boolean" then
+        Config.PrioritizeTotems = savedPriority
+    end
+
+    if typeof(savedAutoSwing) == "boolean" then
+        Config.AutoSwingEnabled = savedAutoSwing
+    end
+
+    if typeof(savedPreview) == "boolean" then
+        Config.ShowZonePreview = savedPreview
+    end
+
+    local loadedCorners = {}
+
+    for index = 1, 4 do
+        local corner = Player:GetAttribute(ConfigAttributePrefix .. "Corner" .. index)
+
+        if typeof(corner) ~= "Vector3" then
+            table.clear(loadedCorners)
+            break
+        end
+
+        table.insert(loadedCorners, corner)
+    end
+
+    local loadedZone = #loadedCorners == 4
+
+    if loadedZone then
+        table.clear(SavedCorners)
+
+        for _, corner in ipairs(loadedCorners) do
+            table.insert(SavedCorners, corner)
+        end
+
+        loadedZone = rebuildZone()
+    end
+
+    refreshZonePreview()
+    return true, loadedZone
 end
 
 local function updateSpeedInterface()
@@ -1099,6 +1435,26 @@ local function updateAutoSwingInterface()
     else
         autoSwingButton.Text = "TU VUNG GAY: TAT"
         autoSwingButton.BackgroundColor3 = Color3.fromRGB(80, 82, 92)
+    end
+end
+
+local function updatePriorityInterface()
+    if Config.PrioritizeTotems then
+        priorityTotemButton.Text = "UU TIEN TOTEM: BAT"
+        priorityTotemButton.BackgroundColor3 = Color3.fromRGB(150, 105, 205)
+    else
+        priorityTotemButton.Text = "UU TIEN TOTEM: TAT"
+        priorityTotemButton.BackgroundColor3 = Color3.fromRGB(80, 82, 92)
+    end
+end
+
+local function updatePreviewInterface()
+    if Config.ShowZonePreview then
+        previewToggleButton.Text = "HIEN DUONG BIEN: BAT"
+        previewToggleButton.BackgroundColor3 = Color3.fromRGB(55, 135, 175)
+    else
+        previewToggleButton.Text = "HIEN DUONG BIEN: TAT"
+        previewToggleButton.BackgroundColor3 = Color3.fromRGB(80, 82, 92)
     end
 end
 
@@ -1135,6 +1491,14 @@ local function updateInterface()
 
     updateSpeedInterface()
     updateAutoSwingInterface()
+    updatePriorityInterface()
+    updatePreviewInterface()
+
+    if ZoneValid then
+        zoneInfo.Text = "Khu vuc 4 goc san sang. Bam LUU CAU HINH de giu trong phien."
+    else
+        zoneInfo.Text = "Luu du 4 goc, sau do bam LUU CAU HINH."
+    end
 end
 
 closeButton.Activated:Connect(function()
@@ -1205,6 +1569,34 @@ resetButton.Activated:Connect(function()
     status.Text = "Da xoa. Dung tai goc thu nhat roi bam LUU GOC."
 end)
 
+saveConfigButton.Activated:Connect(function()
+    local savedZone = saveSessionConfig()
+
+    if savedZone then
+        status.Text = "Da luu 4 goc, toc do va tuy chon trong phien nay."
+    else
+        status.Text = "Da luu tuy chon, nhung chua co du 4 goc hop le."
+    end
+end)
+
+loadConfigButton.Activated:Connect(function()
+    if Enabled then
+        status.Text = "Hay DUNG truoc khi tai cau hinh."
+        return
+    end
+
+    local loaded, loadedZone = loadSessionConfig()
+    updateInterface()
+
+    if not loaded then
+        status.Text = "Chua co cau hinh nao duoc luu trong phien nay."
+    elseif loadedZone then
+        status.Text = "Da tai cau hinh va khoi phuc du 4 goc."
+    else
+        status.Text = "Da tai tuy chon, nhung khong co du 4 goc da luu."
+    end
+end)
+
 toggleButton.Activated:Connect(function()
     if Enabled then
         Enabled = false
@@ -1272,6 +1664,25 @@ autoSwingButton.Activated:Connect(function()
     else
         status.Text = "Da tat tu vung gay."
     end
+end)
+
+priorityTotemButton.Activated:Connect(function()
+    Config.PrioritizeTotems = not Config.PrioritizeTotems
+    updatePriorityInterface()
+
+    status.Text = Config.PrioritizeTotems
+        and "Totem se duoc nhat truoc Token thuong."
+        or "Dang chon muc tieu chi theo khoang cach."
+end)
+
+previewToggleButton.Activated:Connect(function()
+    Config.ShowZonePreview = not Config.ShowZonePreview
+    refreshZonePreview()
+    updatePreviewInterface()
+
+    status.Text = Config.ShowZonePreview
+        and "Da hien duong bien khu vuc."
+        or "Da an duong bien de giam roi man hinh."
 end)
 
 minusButton.Activated:Connect(function()
@@ -1347,7 +1758,14 @@ idleAcknowledgeButton.Activated:Connect(function()
     idleReminder.Visible = false
 end)
 
+local autoLoadedConfig, autoLoadedZone = loadSessionConfig()
 updateInterface()
+
+if autoLoadedConfig then
+    status.Text = autoLoadedZone
+        and "Da tu dong tai cau hinh va 4 goc trong phien."
+        or "Da tu dong tai cac tuy chon da luu trong phien."
+end
 
 -- Mo phong dung hanh vi nhan giu roi tha cua mot Roblox Tool.
 task.spawn(function()
@@ -1462,10 +1880,15 @@ task.spawn(function()
                         local reached = walkThroughTarget(target, humanoid, root)
 
                         if target:IsDescendantOf(workspace) then
-                            blockTarget(
-                                target,
-                                reached and Config.VisitedCooldown or Config.FailedCooldown
-                            )
+                            local cooldown = Config.FailedCooldown
+
+                            if reached then
+                                cooldown = isTotemTarget(target)
+                                    and Config.TotemVisitedCooldown
+                                    or Config.VisitedCooldown
+                            end
+
+                            blockTarget(target, cooldown)
                         end
 
                         CurrentTarget = nil
