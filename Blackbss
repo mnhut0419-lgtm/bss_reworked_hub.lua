@@ -1,118 +1,191 @@
--- ===== SCRIPT AUTO FARM CHO BSS 1:1 (BẢN THAM KHẢO) =====
--- LƯU Ý: Phải thay đổi tên đối tượng, RemoteEvent phù hợp với game của bạn.
--- KHÔNG ĐẢM BẢO HOẠT ĐỘNG, HÃY DÙNG TÀI KHOẢN PHỤ.
+-- ===== SCRIPT AUTO BSS 1:1 – CÓ MENU & TỰ ĐỘNG NHẶT TOTEM =====
+-- LƯU Ý: Bạn cần thay tên RemoteEvent, từ khóa totem cho đúng game.
+-- Chạy bằng executor (Delta, Xeno, etc.) – RỦI RO KHÓA TK.
 
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
 local rootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
 
--- Cấu hình (bạn có thể chỉnh sửa)
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+-- ===== CẤU HÌNH =====
 local CONFIG = {
-    AutoRebirth = true,        -- Tự động Rebirth khi đủ điều kiện
-    AutoCollect = true,        -- Tự động thu thập tài nguyên xung quanh
-    AutoQuest = true,          -- Tự động nhận/nộp nhiệm vụ
-    RebirthWaitTime = 5,       -- Giây chờ giữa các lần Rebirth
-    CollectRange = 30,         -- Bán kính tìm vật phẩm
-    LoopInterval = 1,          -- Tần suất lặp (giây)
+    TotemKeywords = {"totem", "token", "pollen", "honey", "collect"}, -- từ khóa nhận diện totem
+    CollectRange = 100,          -- bán kính tìm totem
+    MoveSpeed = 30,              -- tốc độ di chuyển
+    LoopInterval = 0.5,          -- chu kỳ loop
+    AutoRebirth = false,
+    AutoCollect = true,
+    AutoQuest = false,
 }
 
--- ===== HÀM TÌM ĐỐI TƯỢNG (CẦN SỬA TÊN CHO ĐÚNG GAME) =====
-local function findRebirthButton()
-    -- Ví dụ: Tìm nút Rebirth trên màn hình GUI
-    for _, screenGui in ipairs(player.PlayerGui:GetChildren()) do
-        local btn = screenGui:FindFirstChild("RebirthButton") or screenGui:FindFirstChild("Rebirth")
-        if btn and btn:IsA("TextButton") then
-            return btn
-        end
+-- ===== TẠO MENU GUI =====
+local function createMenu()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "BSSAutoMenu"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = player.PlayerGui
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 250, 0, 300)
+    frame.Position = UDim2.new(0, 10, 0, 10)
+    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    frame.BackgroundTransparency = 0.2
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.Text = "🐝 BSS 1:1 AUTO"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 18
+    title.Parent = frame
+
+    local function makeToggle(text, default, callback, yOffset)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, -20, 0, 30)
+        btn.Position = UDim2.new(0, 10, 0, yOffset)
+        btn.Text = text .. " [OFF]"
+        btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 14
+        btn.Parent = frame
+
+        local state = default
+        btn.MouseButton1Click:Connect(function()
+            state = not state
+            btn.Text = text .. (state and " [ON]" or " [OFF]")
+            callback(state)
+        end)
+        return btn
     end
-    return nil
+
+    local y = 40
+    makeToggle("Auto Collect Totem", CONFIG.AutoCollect, function(v) CONFIG.AutoCollect = v end, y); y = y + 35
+    makeToggle("Auto Rebirth", CONFIG.AutoRebirth, function(v) CONFIG.AutoRebirth = v end, y); y = y + 35
+    makeToggle("Auto Quest", CONFIG.AutoQuest, function(v) CONFIG.AutoQuest = v end, y); y = y + 35
+
+    -- hiển thị trạng thái totem gần nhất
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, -20, 0, 40)
+    statusLabel.Position = UDim2.new(0, 10, 0, y+10)
+    statusLabel.Text = "Đợi..."
+    statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 12
+    statusLabel.TextWrapped = true
+    statusLabel.Parent = frame
+
+    return statusLabel
 end
 
-local function findCollectibles()
-    -- Tìm các vật phẩm có tên chứa "Pollen", "Honey", "Token"
-    local items = {}
+local statusLabel = createMenu()
+
+-- ===== HÀM TÌM TOTEM GẦN NHẤT =====
+local function findNearestTotem()
+    local nearest = nil
+    local minDist = CONFIG.CollectRange
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Part") or obj:IsA("MeshPart") then
+        if obj:IsA("BasePart") or obj:IsA("Model") then
             local name = obj.Name:lower()
-            if name:find("pollen") or name:find("honey") or name:find("token") then
-                if (obj.Position - rootPart.Position).Magnitude < CONFIG.CollectRange then
-                    table.insert(items, obj)
+            local isTotem = false
+            for _, kw in ipairs(CONFIG.TotemKeywords) do
+                if name:find(kw) then
+                    isTotem = true
+                    break
+                end
+            end
+            if isTotem then
+                local pos = obj:IsA("Model") and obj.PrimaryPart and obj.PrimaryPart.Position or obj.Position
+                if pos then
+                    local dist = (pos - rootPart.Position).Magnitude
+                    if dist < minDist then
+                        minDist = dist
+                        nearest = obj
+                    end
                 end
             end
         end
     end
-    return items
+    return nearest, minDist
 end
 
--- ===== HÀM GỬI SỰ KIỆN (REMOTE) – CẦN TÌM ĐÚNG TÊN =====
-local function fireRemote(action, ...)
-    -- Tìm RemoteEvent trong ReplicatedStorage (thường dùng)
-    local remote = game:GetService("ReplicatedStorage"):FindFirstChild("RemoteEvent") 
-                  or game:GetService("ReplicatedStorage"):FindFirstChild("GameEvent")
+-- ===== HÀM DI CHUYỂN MƯỢT MÀ ĐẾN VỊ TRÍ =====
+local function moveTo(position)
+    if not position then return end
+    local tweenInfo = TweenInfo.new(
+        (position - rootPart.Position).Magnitude / CONFIG.MoveSpeed,
+        Enum.EasingStyle.Linear,
+        Enum.EasingDirection.Out
+    )
+    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = CFrame.new(position)})
+    tween:Play()
+    return tween
+end
+
+-- ===== HÀM TƯƠNG TÁC VỚI TOTEM =====
+local function interactWithTotem(totem)
+    if not totem then return end
+    -- Thử ClickDetector
+    local clickDetector = totem:FindFirstChild("ClickDetector")
+    if clickDetector then
+        clickDetector:Click()
+        return true
+    end
+    -- Thử RemoteEvent (cần tìm tên đúng)
+    local remote = game:GetService("ReplicatedStorage"):FindFirstChild("CollectTotem") 
+                   or game:GetService("ReplicatedStorage"):FindFirstChild("RemoteEvent")
     if remote then
-        remote:FireServer(action, ...)
-    else
-        warn("Không tìm thấy RemoteEvent!")
+        remote:FireServer(totem)
+        return true
     end
-end
-
--- ===== TÁC VỤ REBIRTH =====
-local function doRebirth()
-    if not CONFIG.AutoRebirth then return end
-    local btn = findRebirthButton()
-    if btn then
-        btn:Click()  -- hoặc fireRemote("Rebirth") nếu là Remote
-        wait(CONFIG.RebirthWaitTime)
-    else
-        -- Nếu không có nút, thử gửi Remote với action "Rebirth"
-        fireRemote("Rebirth")
-    end
-end
-
--- ===== TÁC VỤ THU THẬP =====
-local function doCollect()
-    if not CONFIG.AutoCollect then return end
-    local items = findCollectibles()
-    for _, item in ipairs(items) do
-        -- Di chuyển đến vị trí item
-        rootPart.CFrame = CFrame.new(item.Position)
-        wait(0.2)
-        -- Giả sử có Remote để thu thập
-        fireRemote("Collect", item)
-        -- Hoặc click trực tiếp nếu là ClickDetector
-        local clickDetector = item:FindFirstChild("ClickDetector")
-        if clickDetector then
-            clickDetector:Click()
-        end
-    end
-end
-
--- ===== TÁC VỤ NHẬN/NỘP QUEST =====
-local function doQuest()
-    if not CONFIG.AutoQuest then return end
-    -- Giả sử có NPC hoặc GUI quest, bạn cần tìm và tương tác
-    -- Ví dụ: Tìm NPC trong workspace
-    for _, npc in ipairs(workspace:GetDescendants()) do
-        if npc:IsA("Model") and npc.Name:find("Quest") then
-            local humanoidNPC = npc:FindFirstChild("Humanoid")
-            if humanoidNPC then
-                -- Di chuyển đến NPC
-                rootPart.CFrame = CFrame.new(npc.PrimaryPart.Position)
-                wait(0.5)
-                -- Gửi Remote nhận/nộp
-                fireRemote("Quest", "Accept") -- hoặc "Complete"
-            end
-        end
-    end
+    -- Nếu là Model, có thể cần nhặt bằng cách gần đó
+    return false
 end
 
 -- ===== VÒNG LẶP CHÍNH =====
 while true do
     pcall(function()
-        doRebirth()
-        doCollect()
-        doQuest()
+        if CONFIG.AutoCollect then
+            local totem, dist = findNearestTotem()
+            if totem then
+                local targetPos = totem:IsA("Model") and totem.PrimaryPart.Position or totem.Position
+                if targetPos and dist > 3 then
+                    statusLabel.Text = "📦 Di chuyển đến " .. totem.Name
+                    moveTo(targetPos)
+                    wait((dist / CONFIG.MoveSpeed) + 0.2) -- chờ tới gần
+                end
+                -- Khi đã gần, tương tác
+                if dist and dist < 5 then
+                    if interactWithTotem(totem) then
+                        statusLabel.Text = "✅ Nhặt: " .. totem.Name
+                    else
+                        statusLabel.Text = "⚠️ Không thể nhặt " .. totem.Name
+                    end
+                    wait(0.3)
+                end
+            else
+                statusLabel.Text = "🔍 Không tìm thấy totem"
+            end
+        end
+
+        -- Auto Rebirth (giữ nguyên từ script cũ)
+        if CONFIG.AutoRebirth then
+            -- Tìm nút Rebirth trong GUI
+            for _, gui in ipairs(player.PlayerGui:GetChildren()) do
+                local btn = gui:FindFirstChild("RebirthButton") or gui:FindFirstChild("Rebirth")
+                if btn and btn:IsA("TextButton") then
+                    btn:Click()
+                    wait(2)
+                end
+            end
+        end
     end)
     wait(CONFIG.LoopInterval)
 end
