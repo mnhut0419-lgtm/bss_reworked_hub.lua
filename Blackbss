@@ -24,7 +24,8 @@ local Config = {
     AutoSwingEnabled = true,
     AutoEquipTool = true,
     PreferredToolName = "", -- De trong de dung Tool dang cam/Tool dau tien.
-    SwingInterval = 0.15,
+    SwingHoldSeconds = 0.35,
+    SwingReleaseSeconds = 0.05,
 
     -- Chi hien canh bao de nguoi dung tu cham man hinh.
     IdleReminderEnabled = true,
@@ -89,6 +90,8 @@ local SpeedHumanoid = nil
 local OriginalWalkSpeed = nil
 local LastSpeedEnforce = 0
 local LastUserInputAt = os.clock()
+local HeldSwingTool = nil
+local SwingToolMissing = false
 
 --==============================================================
 -- NHAN VAT VA TOC DO
@@ -227,6 +230,16 @@ local function findCollectorTool(character, humanoid)
     end
 
     return selectedTool
+end
+
+local function releaseSwingTool()
+    if HeldSwingTool then
+        pcall(function()
+            HeldSwingTool:Deactivate()
+        end)
+    end
+
+    HeldSwingTool = nil
 end
 
 --==============================================================
@@ -713,7 +726,7 @@ local function returnToZoneCenter(character, humanoid, root)
     applyCustomSpeed(humanoid, true)
 
     local centerGoal = getGroundPosition(ZoneCenter, character)
-    humanoid:MoveTo(centerGoal)
+        humanoid:MoveTo(centerGoal)
     local deadline = os.clock() + Config.ReturnTimeout
 
     while Enabled and os.clock() < deadline do
@@ -722,6 +735,7 @@ local function returnToZoneCenter(character, humanoid, root)
         if humanoid.Health <= 0 then
             return false
         end
+
         if horizontalDistance(root.Position, centerGoal) <= Config.ReturnDistance then
             return true
         end
@@ -1063,7 +1077,10 @@ local function updateSpeedInterface()
 end
 
 local function updateAutoSwingInterface()
-    if Config.AutoSwingEnabled then
+    if Config.AutoSwingEnabled and SwingToolMissing then
+        autoSwingButton.Text = "TU VUNG GAY: KHONG TIM THAY TOOL"
+        autoSwingButton.BackgroundColor3 = Color3.fromRGB(190, 85, 65)
+    elseif Config.AutoSwingEnabled then
         autoSwingButton.Text = "TU VUNG GAY: BAT"
         autoSwingButton.BackgroundColor3 = Color3.fromRGB(55, 150, 95)
     else
@@ -1160,6 +1177,7 @@ end)
 resetButton.Activated:Connect(function()
     Enabled = false
     CurrentTarget = nil
+    releaseSwingTool()
     restoreOriginalSpeed()
     stopMoving()
 
@@ -1178,6 +1196,7 @@ toggleButton.Activated:Connect(function()
     if Enabled then
         Enabled = false
         CurrentTarget = nil
+        releaseSwingTool()
         restoreOriginalSpeed()
         stopMoving()
         status.Text = "Da dung va khoi phuc toc do ban dau."
@@ -1227,6 +1246,12 @@ end)
 
 autoSwingButton.Activated:Connect(function()
     Config.AutoSwingEnabled = not Config.AutoSwingEnabled
+
+    if not Config.AutoSwingEnabled then
+        releaseSwingTool()
+        SwingToolMissing = false
+    end
+
     updateAutoSwingInterface()
 
     if Config.AutoSwingEnabled then
@@ -1311,7 +1336,7 @@ end)
 
 updateInterface()
 
--- Tu vung Tool dang cam. Tool.Enabled duoc dung de ton trong hoi chieu.
+-- Mo phong dung hanh vi nhan giu roi tha cua mot Roblox Tool.
 task.spawn(function()
     while gui.Parent do
         if Enabled and Config.AutoSwingEnabled then
@@ -1320,15 +1345,50 @@ task.spawn(function()
             if character and humanoid then
                 local tool = findCollectorTool(character, humanoid)
 
-                if tool and tool.Parent == character and tool.Enabled then
+                if tool and tool.Parent == character then
+                    if SwingToolMissing then
+                        SwingToolMissing = false
+                        updateAutoSwingInterface()
+                    end
+
+                    if HeldSwingTool and HeldSwingTool ~= tool then
+                        releaseSwingTool()
+                    end
+
+                    HeldSwingTool = tool
+
+                    -- Khong chan bang Tool.Enabled: mot so Tool tuy bien tu quan ly hoi chieu.
                     pcall(function()
                         tool:Activate()
                     end)
-                end
-            end
 
-            task.wait(Config.SwingInterval)
+                    task.wait(Config.SwingHoldSeconds)
+
+                    if HeldSwingTool == tool then
+              pcall(function()
+                            tool:Deactivate()
+                        end)
+                        HeldSwingTool = nil
+                    end
+
+                    task.wait(Config.SwingReleaseSeconds)
+                else
+                    releaseSwingTool()
+
+                    if not SwingToolMissing then
+                        SwingToolMissing = true
+                        updateAutoSwingInterface()
+                        status.Text = "Khong tim thay Roblox Tool tren nhan vat."
+                    end
+
+                    task.wait(0.20)
+                end
+            else
+                releaseSwingTool()
+                task.wait(0.20)
+            end
         else
+            releaseSwingTool()
             task.wait(0.20)
         end
     end
@@ -1346,6 +1406,11 @@ task.spawn(function()
         task.wait(1)
     end
 end)
+
+--==============================================================
+-- VONG LAP CHINH
+--==============================================================
+
 task.spawn(function()
     while gui.Parent do
         if not Enabled then
@@ -1430,6 +1495,8 @@ task.spawn(function()
 end)
 
 Player.CharacterRemoving:Connect(function()
+    releaseSwingTool()
+
     if Enabled then
         Enabled = false
         CurrentTarget = nil
@@ -1438,4 +1505,3 @@ Player.CharacterRemoving:Connect(function()
         updateInterface()
     end
 end)
-
