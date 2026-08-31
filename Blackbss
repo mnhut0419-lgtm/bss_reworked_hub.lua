@@ -1,422 +1,118 @@
--- [ BSS ATLAS PRO - MULTI TAB UI ]
-if _G.BSS_Atlas_Running then
-    _G.BSS_Atlas_Running = false
-    task.wait(0.5)
-end
-_G.BSS_Atlas_Running = true
+-- ===== SCRIPT AUTO FARM CHO BSS 1:1 (BẢN THAM KHẢO) =====
+-- LƯU Ý: Phải thay đổi tên đối tượng, RemoteEvent phù hợp với game của bạn.
+-- KHÔNG ĐẢM BẢO HOẠT ĐỘNG, HÃY DÙNG TÀI KHOẢN PHỤ.
 
--- [ SERVICES ]
 local player = game.Players.LocalPlayer
-local virtualUser = game:GetService("VirtualUser")
-local tweenService = game:GetService("TweenService")
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
--- [ CHỐNG AFK ]
-player.Idled:Connect(function()
-    virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-    task.wait(1)
-    virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-end)
+-- Cấu hình (bạn có thể chỉnh sửa)
+local CONFIG = {
+    AutoRebirth = true,        -- Tự động Rebirth khi đủ điều kiện
+    AutoCollect = true,        -- Tự động thu thập tài nguyên xung quanh
+    AutoQuest = true,          -- Tự động nhận/nộp nhiệm vụ
+    RebirthWaitTime = 5,       -- Giây chờ giữa các lần Rebirth
+    CollectRange = 30,         -- Bán kính tìm vật phẩm
+    LoopInterval = 1,          -- Tần suất lặp (giây)
+}
 
--- [ XÓA UI CŨ ]
-local coreGui = game:GetService("CoreGui")
-if coreGui:FindFirstChild("AtlasBSS") then
-    coreGui:FindFirstChild("AtlasBSS"):Destroy()
-end
-
--- [ TẠO UI CHÍNH ]
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = coreGui
-ScreenGui.Name = "AtlasBSS"
-
-local MainFrame = Instance.new("Frame")
-MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-MainFrame.Position = UDim2.new(0.5, -175, 0.3, 0)
-MainFrame.Size = UDim2.new(0, 350, 0, 300)
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.BorderSizePixel = 0
-
--- [ HEADER ]
-local Header = Instance.new("Frame")
-Header.Parent = MainFrame
-Header.Size = UDim2.new(1, 0, 0, 40)
-Header.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-
-local Title = Instance.new("TextLabel")
-Title.Parent = Header
-Title.Size = UDim2.new(1, 0, 1, 0)
-Title.Text = "🐝 ATLAS BSS"
-Title.TextColor3 = Color3.fromRGB(255, 180, 0)
-Title.BackgroundTransparency = 1
-Title.Font = Enum.Font.SourceSansBold
-Title.TextSize = 18
-
--- [ TAB BAR ]
-local TabBar = Instance.new("Frame")
-TabBar.Parent = MainFrame
-TabBar.Size = UDim2.new(1, 0, 0, 35)
-TabBar.Position = UDim2.new(0, 0, 0, 40)
-TabBar.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-
-local function createTab(name, xPos)
-    local tab = Instance.new("TextButton")
-    tab.Parent = TabBar
-    tab.Size = UDim2.new(0.25, 0, 1, 0)
-    tab.Position = UDim2.new(xPos, 0, 0, 0)
-    tab.Text = name
-    tab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    tab.TextColor3 = Color3.fromRGB(200, 200, 200)
-    tab.Font = Enum.Font.SourceSansBold
-    tab.TextSize = 13
-    tab.BorderSizePixel = 0
-    return tab
-end
-
-local FarmTab = createTab("🌾 Farm", 0)
-local CombatTab = createTab("⚔️ Combat", 0.25)
-local CollectTab = createTab("💎 Collect", 0.5)
-local TeleTab = createTab("🚀 Teleport", 0.75)
-
--- [ CONTENT AREA ]
-local ContentArea = Instance.new("Frame")
-ContentArea.Parent = MainFrame
-ContentArea.Size = UDim2.new(1, 0, 1, -75)
-ContentArea.Position = UDim2.new(0, 0, 0, 75)
-ContentArea.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-ContentArea.BorderSizePixel = 0
-
--- [ TAB PAGES ]
-local FarmPage = Instance.new("Frame")
-FarmPage.Parent = ContentArea
-FarmPage.Size = UDim2.new(1, 0, 1, 0)
-FarmPage.BackgroundTransparency = 1
-
-local CombatPage = Instance.new("Frame")
-CombatPage.Parent = ContentArea
-CombatPage.Size = UDim2.new(1, 0, 1, 0)
-CombatPage.BackgroundTransparency = 1
-CombatPage.Visible = false
-
-local CollectPage = Instance.new("Frame")
-CollectPage.Parent = ContentArea
-CollectPage.Size = UDim2.new(1, 0, 1, 0)
-CollectPage.BackgroundTransparency = 1
-CollectPage.Visible = false
-
-local TelePage = Instance.new("Frame")
-TelePage.Parent = ContentArea
-TelePage.Size = UDim2.new(1, 0, 1, 0)
-TelePage.BackgroundTransparency = 1
-TelePage.Visible = false
-
--- [ TAB SWITCHING ]
-local function switchTab(tab, page)
-    FarmTab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    CombatTab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    CollectTab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    TeleTab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    
-    FarmPage.Visible = false
-    CombatPage.Visible = false
-    CollectPage.Visible = false
-    TelePage.Visible = false
-    
-    tab.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
-    page.Visible = true
-end
-
-FarmTab.MouseButton1Click:Connect(function()
-    switchTab(FarmTab, FarmPage)
-end)
-
-CombatTab.MouseButton1Click:Connect(function()
-    switchTab(CombatTab, CombatPage)
-end)
-
-CollectTab.MouseButton1Click:Connect(function()
-    switchTab(CollectTab, CollectPage)
-end)
-
-TeleTab.MouseButton1Click:Connect(function()
-    switchTab(TeleTab, TelePage)
-end)
-
--- [ CREATE TOGGLE BUTTON ]
-local function createToggle(parent, yPos, text)
-    local toggleFrame = Instance.new("Frame")
-    toggleFrame.Parent = parent
-    toggleFrame.Size = UDim2.new(0.95, 0, 0, 35)
-    toggleFrame.Position = UDim2.new(0.025, 0, 0, yPos)
-    toggleFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    toggleFrame.BorderSizePixel = 0
-    
-    local label = Instance.new("TextLabel")
-    label.Parent = toggleFrame
-    label.Size = UDim2.new(0.7, 0, 1, 0)
-    label.Text = text
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.BackgroundTransparency = 1
-    label.Font = Enum.Font.SourceSans
-    label.TextSize = 12
-    
-    local btn = Instance.new("TextButton")
-    btn.Parent = toggleFrame
-    btn.Size = UDim2.new(0.3, 0, 0.8, 0)
-    btn.Position = UDim2.new(0.7, 0, 0.1, 0)
-    btn.Text = "OFF"
-    btn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.SourceSansBold
-    btn.TextSize = 12
-    btn.BorderSizePixel = 0
-    
-    local state = false
-    
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        btn.Text = state and "ON" or "OFF"
-        btn.BackgroundColor3 = state and Color3.fromRGB(40, 150, 40) or Color3.fromRGB(150, 40, 40)
-    end)
-    
-    return btn
-end
-
--- [ CREATE ACTION BUTTON ]
-local function createAction(parent, yPos, text)
-    local btn = Instance.new("TextButton")
-    btn.Parent = parent
-    btn.Size = UDim2.new(0.95, 0, 0, 35)
-    btn.Position = UDim2.new(0.025, 0, 0, yPos)
-    btn.Text = text
-    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.SourceSansBold
-    btn.TextSize = 12
-    btn.BorderSizePixel = 0
-    return btn
-end
-
--- [ FARM TAB BUTTONS ]
-local farmPollenBtn = createToggle(FarmPage, 10, "🌼 Farm Phấn Hoa")
-local farmSproutBtn = createToggle(FarmPage, 50, "🌱 Farm Sprout")
-local autoAbilityBtn = createToggle(FarmPage, 90, "⚡ Auto Ability")
-
--- [ COMBAT TAB BUTTONS ]
-local farmBossBtn = createToggle(CombatPage, 10, "👑 Farm Boss")
-local farmMobsBtn = createToggle(CombatPage, 50, "⚔️ Farm Mobs")
-local autoAttackBtn = createToggle(CombatPage, 90, "💥 Auto Attack")
-
--- [ COLLECT TAB BUTTONS ]
-local collectTokensBtn = createToggle(CollectPage, 10, "🎯 Thu Thập Token")
-local collectHoneyBtn = createToggle(CollectPage, 50, "🍯 Thu Thập Mật")
-local autoLootBtn = createToggle(CollectPage, 90, "📦 Auto Loot")
-
--- [ TELEPORT TAB BUTTONS ]
-local savePosBtn = createAction(TelePage, 10, "📍 Lưu Vị Trí")
-local teleBackBtn = createAction(TelePage, 50, "🚀 Teleport Về")
-local teleFieldsBtn = createAction(TelePage, 90, "🗺️ Teleport Fields")
-
--- [ THU NHỎ MENU ]
-local MinimizeBtn = Instance.new("TextButton")
-MinimizeBtn.Parent = ScreenGui
-MinimizeBtn.Size = UDim2.new(0, 80, 0, 30)
-MinimizeBtn.Position = UDim2.new(0, 10, 0.5, -15)
-MinimizeBtn.Text = "📋 Menu"
-MinimizeBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
-MinimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-MinimizeBtn.Font = Enum.Font.SourceSansBold
-MinimizeBtn.TextSize = 12
-MinimizeBtn.Visible = false
-
-local minimizeAction = createAction(MainFrame, 265, "📉 Thu Nhỏ")
-minimizeAction.MouseButton1Click:Connect(function()
-    MainFrame.Visible = false
-    MinimizeBtn.Visible = true
-end)
-
-MinimizeBtn.MouseButton1Click:Connect(function()
-    MainFrame.Visible = true
-    MinimizeBtn.Visible = false
-end)
-
--- [ FARM LOGIC ]
-local farmPollen = false
-local farmSprout = false
-local autoAbility = false
-local farmBoss = false
-local farmMobs = false
-local autoAttack = false
-local collectTokens = false
-local collectHoney = false
-local autoLoot = false
-local savedPosition = nil
-
--- Farm Phấn Hoa
-farmPollenBtn.MouseButton1Click:Connect(function()
-    farmPollen = not farmPollen
-end)
-
-task.spawn(function()
-    while _G.BSS_Atlas_Running do
-        task.wait(0.1)
-        if farmPollen then
-            local char = player.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local root = char.HumanoidRootPart
-                
-                -- Tìm flowers
-                local flowers = {}
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    if obj:IsA("BasePart") and obj.Name:lower():match("flower") then
-                        table.insert(flowers, obj)
-                    end
-                end
-                
-                if #flowers > 0 then
-                    local target = flowers[math.random(1, #flowers)]
-                    if char:FindFirstChild("Humanoid") then
-                        char.Humanoid:MoveTo(target.Position)
-                        
-                        local tool = char:FindFirstChildOfClass("Tool")
-                        if not tool then
-                            local bpTool = player.Backpack:FindFirstChildOfClass("Tool")
-                            if bpTool then
-                                char.Humanoid:EquipTool(bpTool)
-                            end
-                        elseif tool then
-                            tool:Activate()
-                        end
-                    end
-                end
-            end
+-- ===== HÀM TÌM ĐỐI TƯỢNG (CẦN SỬA TÊN CHO ĐÚNG GAME) =====
+local function findRebirthButton()
+    -- Ví dụ: Tìm nút Rebirth trên màn hình GUI
+    for _, screenGui in ipairs(player.PlayerGui:GetChildren()) do
+        local btn = screenGui:FindFirstChild("RebirthButton") or screenGui:FindFirstChild("Rebirth")
+        if btn and btn:IsA("TextButton") then
+            return btn
         end
     end
-end)
+    return nil
+end
 
--- Thu Thập Token
-collectTokensBtn.MouseButton1Click:Connect(function()
-    collectTokens = not collectTokens
-end)
-
-task.spawn(function()
-    while _G.BSS_Atlas_Running do
-        task.wait(0.05)
-        if collectTokens then
-            local char = player.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local root = char.HumanoidRootPart
-                local nearestToken = nil
-                local shortestDist = 100
-                
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    if obj:IsA("BasePart") and obj.Name:lower():match("token") then
-                        local dist = (obj.Position - root.Position).Magnitude
-                        if dist < shortestDist then
-                            shortestDist = dist
-                            nearestToken = obj
-                        end
-                    end
-                end
-                
-                if nearestToken and char:FindFirstChild("Humanoid") then
-                    char.Humanoid:MoveTo(nearestToken.Position)
-                    if shortestDist < 5 then
-                        root.CFrame = CFrame.new(nearestToken.Position)
-                    end
-                end
-            end
-        end
-    end
-end)
-
--- Farm Boss
-farmBossBtn.MouseButton1Click:Connect(function()
-    farmBoss = not farmBoss
-end)
-
-task.spawn(function()
-    while _G.BSS_Atlas_Running do
-        task.wait(0.5)
-        if farmBoss then
-            local char = player.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local root = char.HumanoidRootPart
-                
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    if obj:IsA("Model") and obj.Name:lower():match("boss") then
-                        local bossRoot = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Torso")
-                        if bossRoot then
-                            local dist = (bossRoot.Position - root.Position).Magnitude
-                            if dist < 100 then
-                                if char:FindFirstChild("Humanoid") then
-                                    char.Humanoid:MoveTo(bossRoot.Position)
-                                    
-                                    local tool = char:FindFirstChildOfClass("Tool")
-                                    if tool and dist < 20 then
-                                        tool:Activate()
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-end)
-
--- Auto Ability
-autoAbilityBtn.MouseButton1Click:Connect(function()
-    autoAbility = not autoAbility
-end)
-
-task.spawn(function()
-    while _G.BSS_Atlas_Running do
-        task.wait(1)
-        if autoAbility then
-            local char = player.Character
-            if char and char:FindFirstChildOfClass("Tool") then
-                local tool = char:FindFirstChildOfClass("Tool")
-                tool:Activate()
-            end
-        end
-    end
-end)
-
--- Save Position
-savePosBtn.MouseButton1Click:Connect(function()
-    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        savedPosition = player.Character.HumanoidRootPart.CFrame
-        savePosBtn.Text = "✅ Đã Lưu!"
-        task.wait(1)
-        savePosBtn.Text = "📍 Lưu Vị Trí"
-    end
-end)
-
--- Teleport Back
-teleBackBtn.MouseButton1Click:Connect(function()
-    if savedPosition and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        player.Character.HumanoidRootPart.CFrame = savedPosition
-    end
-end)
-
--- Teleport Fields
-teleFieldsBtn.MouseButton1Click:Connect(function()
-    -- Tìm và teleport tới field ngẫu nhiên
-    local fields = {}
+local function findCollectibles()
+    -- Tìm các vật phẩm có tên chứa "Pollen", "Honey", "Token"
+    local items = {}
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name:lower():match("field") then
-            table.insert(fields, obj)
+        if obj:IsA("Part") or obj:IsA("MeshPart") then
+            local name = obj.Name:lower()
+            if name:find("pollen") or name:find("honey") or name:find("token") then
+                if (obj.Position - rootPart.Position).Magnitude < CONFIG.CollectRange then
+                    table.insert(items, obj)
+                end
+            end
         end
     end
-    
-    if #fields > 0 and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        local randomField = fields[math.random(1, #fields)]
-        player.Character.HumanoidRootPart.CFrame = CFrame.new(randomField.Position + Vector3.new(0, 10, 0))
-    end
-end)
+    return items
+end
 
--- [ THÔNG BÁO ]
-print("✅ Atlas BSS Script đã sẵn sàng!")
-print("📋 Menu chia tabs: Farm | Combat | Collect | Teleport")
+-- ===== HÀM GỬI SỰ KIỆN (REMOTE) – CẦN TÌM ĐÚNG TÊN =====
+local function fireRemote(action, ...)
+    -- Tìm RemoteEvent trong ReplicatedStorage (thường dùng)
+    local remote = game:GetService("ReplicatedStorage"):FindFirstChild("RemoteEvent") 
+                  or game:GetService("ReplicatedStorage"):FindFirstChild("GameEvent")
+    if remote then
+        remote:FireServer(action, ...)
+    else
+        warn("Không tìm thấy RemoteEvent!")
+    end
+end
+
+-- ===== TÁC VỤ REBIRTH =====
+local function doRebirth()
+    if not CONFIG.AutoRebirth then return end
+    local btn = findRebirthButton()
+    if btn then
+        btn:Click()  -- hoặc fireRemote("Rebirth") nếu là Remote
+        wait(CONFIG.RebirthWaitTime)
+    else
+        -- Nếu không có nút, thử gửi Remote với action "Rebirth"
+        fireRemote("Rebirth")
+    end
+end
+
+-- ===== TÁC VỤ THU THẬP =====
+local function doCollect()
+    if not CONFIG.AutoCollect then return end
+    local items = findCollectibles()
+    for _, item in ipairs(items) do
+        -- Di chuyển đến vị trí item
+        rootPart.CFrame = CFrame.new(item.Position)
+        wait(0.2)
+        -- Giả sử có Remote để thu thập
+        fireRemote("Collect", item)
+        -- Hoặc click trực tiếp nếu là ClickDetector
+        local clickDetector = item:FindFirstChild("ClickDetector")
+        if clickDetector then
+            clickDetector:Click()
+        end
+    end
+end
+
+-- ===== TÁC VỤ NHẬN/NỘP QUEST =====
+local function doQuest()
+    if not CONFIG.AutoQuest then return end
+    -- Giả sử có NPC hoặc GUI quest, bạn cần tìm và tương tác
+    -- Ví dụ: Tìm NPC trong workspace
+    for _, npc in ipairs(workspace:GetDescendants()) do
+        if npc:IsA("Model") and npc.Name:find("Quest") then
+            local humanoidNPC = npc:FindFirstChild("Humanoid")
+            if humanoidNPC then
+                -- Di chuyển đến NPC
+                rootPart.CFrame = CFrame.new(npc.PrimaryPart.Position)
+                wait(0.5)
+                -- Gửi Remote nhận/nộp
+                fireRemote("Quest", "Accept") -- hoặc "Complete"
+            end
+        end
+    end
+end
+
+-- ===== VÒNG LẶP CHÍNH =====
+while true do
+    pcall(function()
+        doRebirth()
+        doCollect()
+        doQuest()
+    end)
+    wait(CONFIG.LoopInterval)
+end
