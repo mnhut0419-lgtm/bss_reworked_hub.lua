@@ -1,228 +1,178 @@
--- ==============================================================================
--- ATLAS MOD FRAMEWORK BASE (BEE SWARM SIMULATOR CLONE)
--- Tối ưu hóa: Luau, OOP, Task Library, TweenService, Non-Yielding Loops
--- ==============================================================================
+-- Tải thư viện giao diện cao cấp (Giống Atlas Hub)
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
+local Window = Rayfield:CreateWindow({
+   Name = "🐝 Atlas Hub | BSS 1:1",
+   LoadingTitle = "Đang tải Atlas Hub...",
+   LoadingSubtitle = "Tối ưu cho Delta Mobile",
+   ConfigurationSaving = { Enabled = false },
+   KeySystem = false
+})
 
-local LocalPlayer = Players.LocalPlayer
+-- [ CÁC BIẾN TOÀN CỤC ]
+local _G = getgenv and getgenv() or _G
+_G.Atlas_AutoFarm = false
+_G.Atlas_AutoCollect = false
+_G.Atlas_WalkSpeed = 40
+_G.HiveLocation = nil
 
--- ==========================================
--- MODULE: CẤU HÌNH (CONFIGURATION)
--- ==========================================
-local Config = {
-    FarmSpeed = 25, -- Tốc độ Tween (WalkSpeed mô phỏng)
-    TokenRadius = 40, -- Bán kính quét vật phẩm (Studs)
-    SafeDistance = 25, -- Khoảng cách né quái
-    FieldVectors = {
-        Sunflower = Vector3.new(100, 5, 150), -- Tọa độ ví dụ của Cánh đồng
-        Mushroom = Vector3.new(-50, 5, 120)
-    },
-    HiveLocation = Vector3.new(0, 5, 20) -- Tọa độ tổ ong của người chơi
-}
+local player = game.Players.LocalPlayer
+local virtualUser = game:GetService("VirtualUser")
 
--- ==========================================
--- MODULE CHÍNH: AUTOFARM (CORE FRAMEWORK)
--- ==========================================
-local AtlasFarm = {}
-AtlasFarm.__index = AtlasFarm
+-- [ CHỐNG AFK TRÁNH VĂNG GAME ]
+player.Idled:Connect(function()
+    virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+end)
 
-function AtlasFarm.new()
-    local self = setmetatable({}, AtlasFarm)
-    self.Player = LocalPlayer
-    self.Character = self.Player.Character or self.Player.CharacterAdded:Wait()
-    self.RootPart = self.Character:WaitForChild("HumanoidRootPart")
-    self.Humanoid = self.Character:WaitForChild("Humanoid")
-    
-    self.IsRunning = false
-    self.CurrentField = nil
-    self.State = "IDLE" -- Các trạng thái: IDLE, FARMING, CONVERTING, EVADING
-    self.Cooldowns = {}
-    
-    return self
-end
+-- [ TẠO CÁC TAB CHỨC NĂNG ]
+local MainTab = Window:CreateTab("Auto Farm & Nhặt", 4483362458)
+local HiveTab = Window:CreateTab("Tổ & Đổi Mật", 4483362458)
 
--- ==========================================
--- 1. CƠ CHẾ DI CHUYỂN & THU THẬP (MOVEMENT & FARMING)
--- ==========================================
+-- [ MENU: AUTO FARM ]
+MainTab:CreateToggle({
+   Name = "Vừa Đi Vừa Farm (Auto Swing)",
+   CurrentValue = false,
+   Flag = "AutoFarmToggle",
+   Callback = function(Value)
+       _G.Atlas_AutoFarm = Value
+   end,
+})
 
--- Hàm di chuyển mượt mà bằng TweenService
-function AtlasFarm:TweenTo(targetPosition)
-    if not self.RootPart then return end
-    
-    local distance = (self.RootPart.Position - targetPosition).Magnitude
-    local timeToTravel = distance / Config.FarmSpeed
-    
-    local tweenInfo = TweenInfo.new(timeToTravel, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut)
-    local goal = {CFrame = CFrame.new(targetPosition)}
-    
-    local tween = TweenService:Create(self.RootPart, tweenInfo, goal)
-    tween:Play()
-    tween.Completed:Wait() -- Chờ Tween chạy xong mà không block luồng nếu bọc trong task
-end
+MainTab:CreateToggle({
+   Name = "Đi Nhặt Kỹ Năng (Thông Minh)",
+   CurrentValue = false,
+   Flag = "AutoCollectToggle",
+   Callback = function(Value)
+       _G.Atlas_AutoCollect = Value
+   end,
+})
 
--- Thuật toán di chuyển Zigzag để gom phấn hoa
-function AtlasFarm:FarmZigzag(fieldCenter)
-    local width, length = 30, 30 -- Kích thước cánh đồng
-    local step = 5
-    
-    for x = -width/2, width/2, step do
-        for z = -length/2, length/2, step do
-            if self.State ~= "FARMING" then return end -- Ngắt ngang nếu phải về tổ
+MainTab:CreateSlider({
+   Name = "Tốc Độ Đi Bộ Khi Nhặt",
+   Range = {16, 100},
+   Increment = 1,
+   Suffix = "Speed",
+   CurrentValue = 40,
+   Flag = "WalkSpeedSlider",
+   Callback = function(Value)
+       _G.Atlas_WalkSpeed = Value
+   end,
+})
+
+-- [ MENU: TỔ ONG ]
+HiveTab:CreateButton({
+   Name = "📍 Lưu Vị Trí Tổ Hiện Tại",
+   Callback = function()
+       if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+           _G.HiveLocation = player.Character.HumanoidRootPart.CFrame
+           Rayfield:Notify({
+               Title = "Thành Công",
+               Content = "Đã lưu vị trí tổ của bạn!",
+               Duration = 3,
+               Image = 4483362458,
+           })
+       end
+   end,
+})
+
+HiveTab:CreateButton({
+   Name = "🏠 Dịch Chuyển Về Tổ (Đổi Mật)",
+   Callback = function()
+       if _G.HiveLocation and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+           player.Character.HumanoidRootPart.CFrame = _G.HiveLocation
+       else
+           Rayfield:Notify({
+               Title = "Lỗi",
+               Content = "Bạn chưa lưu vị trí tổ! Hãy đứng ở tổ và bấm Lưu.",
+               Duration = 3,
+               Image = 4483362458,
+           })
+       end
+   end,
+})
+
+-- [ LOGIC 1: AUTO SWING (VUNG GẬY MƯỢT MÀ) ]
+task.spawn(function()
+    while task.wait(0.1) do
+        if _G.Atlas_AutoFarm then
+            local char = player.Character
+            if char and char:FindFirstChild("Humanoid") then
+                local tool = char:FindFirstChildOfClass("Tool")
+                if not tool then
+                    local bpTool = player.Backpack:FindFirstChildOfClass("Tool")
+                    if bpTool then 
+                        char.Humanoid:EquipTool(bpTool)
+                        tool = bpTool
+                    end
+                end
+                if tool then
+                    tool:Activate()
+                end
+            end
+        end
+    end
+end)
+
+-- [ LOGIC 2: NHẶT KỸ NĂNG THÔNG MINH KIỂU ATLAS ]
+local currentTarget = nil
+local targetStartTime = 0
+local blacklistedTokens = {} -- Danh sách các token bị lỗi/biến mất
+
+task.spawn(function()
+    while task.wait(0.05) do
+        local char = player.Character
+        if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
+            local humanoid = char.Humanoid
+            local root = char.HumanoidRootPart
             
-            -- Tính toán tọa độ tiếp theo
-            local target = fieldCenter + Vector3.new(x, 0, (x % (step*2) == 0) and z or -z)
-            self:TweenTo(target)
-        end
-    end
-end
-
--- Vòng lặp quét và thu thập Token bất đồng bộ
-function AtlasFarm:StartTokenCollector()
-    task.spawn(function()
-        while self.IsRunning do
-            if self.RootPart then
-                -- Giả định game lưu các token rớt ra trong Workspace.Tokens
-                local tokens = Workspace:FindFirstChild("Tokens")
-                if tokens then
-                    for _, token in ipairs(tokens:GetChildren()) do
-                        if token:IsA("BasePart") then
-                            local dist = (self.RootPart.Position - token.Position).Magnitude
-                            if dist <= Config.TokenRadius then
-                                -- Bắn Remote Event nhặt token tới Server (Cấu hình lại ID/Tên Remote tùy game)
-                                -- ReplicatedStorage.Remotes.CollectToken:FireServer(token)
-                                token:Destroy() -- Xóa cục bộ để giảm lag (Server sẽ xử lý sau)
-                            end
-                        end
-                    end
-                end
-            end
-            task.wait(0.1) -- Tối ưu hiệu suất, không dùng wait()
-        end
-    end)
-end
-
--- ==========================================
--- 2. QUẢN LÝ KHO CHỨA (INVENTORY & RETURN BASE)
--- ==========================================
-
--- Kiểm tra sức chứa của Balo (Return: Tỷ lệ %)
-function AtlasFarm:GetBackpackPercentage()
-    -- Thay thế đường dẫn này bằng GUI hoặc Stats thật của game
-    -- Ví dụ: local current = self.Player.leaderstats.Pollen.Value
-    local currentPollen = 100 -- Fake data
-    local maxCapacity = 100 -- Fake data
-    
-    return (currentPollen / maxCapacity) * 100
-end
-
--- Logic Convert Mật Ong
-function AtlasFarm:ReturnAndConvert()
-    self.State = "CONVERTING"
-    
-    -- 1. Di chuyển về tổ ong
-    self:TweenTo(Config.HiveLocation)
-    task.wait(0.5)
-    
-    -- 2. Kích hoạt Make Honey (Gọi Remote)
-    print("[Atlas] Đang chuyển hóa phấn hoa thành mật...")
-    -- ReplicatedStorage.Remotes.MakeHoney:FireServer()
-    
-    -- 3. Vòng lặp chờ balo trống
-    while self:GetBackpackPercentage() > 0 do
-        task.wait(0.5)
-    end
-    
-    print("[Atlas] Đã chuyển hóa xong, quay lại cánh đồng.")
-    self.State = "FARMING"
-end
-
--- ==========================================
--- 3. TÍNH NĂNG HỖ TRỢ C NÂNG CAO (COMBAT & BUFFS)
--- ==========================================
-
--- Kích hoạt vật phẩm dựa trên thời gian hồi chiêu
-function AtlasFarm:UseItem(itemName, cooldownTime)
-    local lastUsed = self.Cooldowns[itemName] or 0
-    local currentTime = tick()
-    
-    if currentTime - lastUsed >= cooldownTime then
-        print("[Atlas] Đang sử dụng vật phẩm: " .. itemName)
-        -- ReplicatedStorage.Remotes.UseItem:FireServer(itemName)
-        self.Cooldowns[itemName] = currentTime
-    end
-end
-
--- Cơ chế né tránh quái vật (Zone Checking)
-function AtlasFarm:StartEvadeSystem()
-    task.spawn(function()
-        while self.IsRunning do
-            if self.RootPart then
-                -- Giả định quái nằm trong Workspace.Monsters
-                local monsters = Workspace:FindFirstChild("Monsters")
-                if monsters then
-                    for _, mob in ipairs(monsters:GetChildren()) do
-                        if mob:FindFirstChild("HumanoidRootPart") then
-                            local dist = (self.RootPart.Position - mob.HumanoidRootPart.Position).Magnitude
-                            if dist < Config.SafeDistance then
-                                self.State = "EVADING"
-                                -- Lùi lại theo hướng ngược lại với quái
-                                local runDirection = (self.RootPart.Position - mob.HumanoidRootPart.Position).Unit
-                                local safePos = self.RootPart.Position + (runDirection * 20)
-                                self:TweenTo(safePos)
-                                self.State = "FARMING"
-                            end
-                        end
-                    end
-                end
-            end
-            RunService.Heartbeat:Wait() -- Chạy theo từng frame, cực kỳ mượt và không delay
-        end
-    end)
-end
-
--- ==========================================
--- HÀM KHỞI ĐỘNG (MAIN LOOP)
--- ==========================================
-function AtlasFarm:Start()
-    if self.IsRunning then return end
-    self.IsRunning = true
-    self.State = "FARMING"
-    
-    print("[Atlas] Khởi động hệ thống...")
-    
-    -- Bật các tiến trình chạy ngầm (Threads)
-    self:StartTokenCollector()
-    self:StartEvadeSystem()
-    
-    -- Vòng lặp Farm chính
-    task.spawn(function()
-        while self.IsRunning do
-            if self.State == "FARMING" then
-                -- 1. Kiểm tra Balo
-                if self:GetBackpackPercentage() >= 100 then
-                    self:ReturnAndConvert()
-                else
-                    -- 2. Buff kỹ năng (Ví dụ cắm Sprinkler mỗi 30 giây)
-                    self:UseItem("Sprinkler", 30)
+            if _G.Atlas_AutoCollect then
+                humanoid.WalkSpeed = _G.Atlas_WalkSpeed
+                
+                -- NẾU ĐANG CÓ MỤC TIÊU
+                if currentTarget and currentTarget.Parent and not blacklistedTokens[currentTarget] then
+                    local dist = (currentTarget.Position - root.Position).Magnitude
                     
-                    -- 3. Farm tại cánh đồng
-                    self.CurrentField = Config.FieldVectors.Sunflower
-                    self:FarmZigzag(self.CurrentField)
+                    -- TIMEOUT: Nếu quá 3 giây chưa tới nơi (bị kẹt hoặc token hết hạn biến mất)
+                    if tick() - targetStartTime > 3 then
+                        blacklistedTokens[currentTarget] = true -- Bỏ vào danh sách đen
+                        currentTarget = nil -- Hủy ghim ngay lập tức
+                    elseif dist <= 4 then
+                        currentTarget = nil -- Đã nhặt thành công, hủy ghim
+                    else
+                        humanoid:MoveTo(currentTarget.Position) -- Tiếp tục đi tới
+                    end
+                else
+                    -- TÌM MỤC TIÊU MỚI (CHỈ TÌM TRONG BÁN KÍNH 60M)
+                    local closestToken = nil
+                    local shortestDist = 60 
+                    
+                    for _, obj in ipairs(workspace:GetDescendants()) do
+                        if obj:IsA("BasePart") and not blacklistedTokens[obj] then
+                            local name = obj.Name:lower()
+                            if name:match("token") or name:match("drop") or name:match("coin") or name == "c" then
+                                local dist = (obj.Position - root.Position).Magnitude
+                                if dist <= shortestDist then
+                                    shortestDist = dist
+                                    closestToken = obj
+                                end
+                            end
+                        end
+                    end
+                    
+                    -- NẾU TÌM THẤY -> GHIM LẠI VÀ BẮT ĐẦU ĐẾM THỜI GIAN
+                    if closestToken then
+                        currentTarget = closestToken
+                        targetStartTime = tick() -- Bắt đầu bấm giờ
+                        humanoid:MoveTo(closestToken.Position)
+                    end
                 end
+            else
+                -- Khi tắt Auto Nhặt, reset lại mọi thứ
+                currentTarget = nil
+                humanoid.WalkSpeed = 16
             end
-            task.wait(0.1)
         end
-    end)
-end
-
-function AtlasFarm:Stop()
-    self.IsRunning = false
-    self.State = "IDLE"
-    print("[Atlas] Đã tắt hệ thống.")
-end
-
-return AtlasFarm
+    end
+end)
