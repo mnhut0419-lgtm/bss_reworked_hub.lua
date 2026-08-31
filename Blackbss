@@ -1,182 +1,99 @@
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-local Window = Rayfield:CreateWindow({
-   Name = "Macroware Style - Bee Swarm Hub",
-   LoadingTitle = "Đang tải hệ thống Macro...",
-   LoadingSubtitle = "Fix Auto Collect",
-   ConfigurationSaving = { Enabled = false }
-})
-
+-- BSS 1:1 Auto Farm Template
 local player = game.Players.LocalPlayer
-local vim = game:GetService("VirtualInputManager")
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local virtualUser = game:GetService("VirtualUser")
 
-_G.AutoDig = false
-_G.AutoCollect = false
-local currentField = "Sunflower Field"
+-- [ TÙY CHỈNH TỌA ĐỘ VÀ ĐƯỜNG DẪN ] --
+-- Bạn cần thay đổi các thông số này cho khớp với game BSS 1:1
+local fieldCFrame = CFrame.new(10, 50, 10) -- Tọa độ của cánh đồng bạn muốn farm
+local hiveCFrame = CFrame.new(-50, 50, -50) -- Tọa độ tổ ong để quay về đổi mật
+local tokenFolder = workspace -- Đổi thành đường dẫn chứa token của game (VD: workspace.Collectibles)
 
--- ================= TAB 1: AUTO FARM =================
-local FarmTab = Window:CreateTab("Auto Farm", nil)
+-- [ CÁC BIẾN BẬT/TẮT ] --
+local _G.AutoFarm = true
+local _G.AutoCollect = true
+local _G.AutoConvert = true
 
-FarmTab:CreateDropdown({
-   Name = "Chọn Cánh Đồng (Field)",
-   Options = {"Sunflower Field", "Dandelion Field", "Mushroom Field", "Blue Flower Field", "Clover Field", "Spider Field", "Strawberry Field", "Rose Field", "Pine Tree Forest", "Pumpkin Patch", "Pineapple Patch", "Cactus Field", "Mountain Top Field", "Pepper Patch", "Coconut Field", "Stump Field"},
-   CurrentOption = {currentField},
-   MultipleOptions = false,
-   Flag = "FieldSelect",
-   Callback = function(Option)
-      currentField = Option[1]
-      pcall(function()
-          local char = player.Character
-          local root = char and char:FindFirstChild("HumanoidRootPart")
-          if root then
-              local fieldPart = workspace:FindFirstChild("FlowerZones") and workspace.FlowerZones:FindFirstChild(currentField) 
-                                or workspace:FindFirstChild(currentField) 
-                                or workspace:FindFirstChild("Fields") and workspace.Fields:FindFirstChild(currentField)
-              if fieldPart then
-                  root.CFrame = fieldPart.CFrame + Vector3.new(0, 5, 0)
-                  Rayfield:Notify({Title = "Dịch chuyển", Content = "Đã đến: " .. currentField, Duration = 3})
-              end
-          end
-      end)
-   end,
-})
-
-FarmTab:CreateToggle({
-   Name = "Bật Auto Dig (Tự động đào/vung gậy)",
-   CurrentValue = false,
-   Flag = "DigToggle",
-   Callback = function(Value)
-       _G.AutoDig = Value
-   end,
-})
-
-FarmTab:CreateToggle({
-   Name = "Bật Tự Động Nhặt Token & Item (Đã Fix)",
-   CurrentValue = false,
-   Flag = "CollectToggle",
-   Callback = function(Value)
-       _G.AutoCollect = Value
-   end,
-})
-
--- ================= TAB 2: TIỆN ÍCH =================
-local MiscTab = Window:CreateTab("Tiện ích", nil)
-
-MiscTab:CreateButton({
-   Name = "Kích hoạt Anti-AFK (Chống văng)",
-   Callback = function()
-       local vu = game:GetService("VirtualUser")
-       player.Idled:Connect(function()
-           vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-           task.wait(1)
-           vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-       end)
-       Rayfield:Notify({Title = "Thành công", Content = "Đã bật chống AFK!", Duration = 3})
-   end,
-})
-
-MiscTab:CreateButton({
-   Name = "Tắt Đồ Họa 3D (Siêu mượt)",
-   Callback = function()
-       game:GetService("RunService"):Set3dRenderingEnabled(false)
-   end,
-})
-
--- ================= CÁC VÒNG LẶP XỬ LÝ =================
-
--- Vòng lặp Auto Dig
-task.spawn(function()
-    while task.wait(0.1) do
-        if _G.AutoDig then
-            pcall(function()
-                vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-                task.wait(0.05)
-                vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-            end)
-        end
-    end
+-- Chống AFK (Tránh bị kick khỏi server khi treo máy)
+player.Idled:Connect(function()
+    virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- Vòng lặp quét Token / Item chuẩn xác cho BSS
+-- Hàm Dịch chuyển tức thời
+local function teleport(cframe)
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        character.HumanoidRootPart.CFrame = cframe
+    end
+end
+
+-- 1. Chức năng Auto Farm (Tự động vung công cụ)
 task.spawn(function()
-    while task.wait(0.15) do
-        if _G.AutoCollect then
-            pcall(function()
-                local char = player.Character
-                if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
-                    local root = char.HumanoidRootPart
-                    local hum = char.Humanoid
-                    local targetPos = nil
-                    local minDistance = 80 -- Tăng phạm vi quét rộng hơn
-                    
-                    -- Tìm kiếm trong các thư mục lưu token thường gặp của BSS
-                    local foldersToCheck = {workspace, workspace:FindFirstChild("Collectibles"), workspace:FindFirstChild("Tokens")}
-                    for _, folder in pairs(foldersToCheck) do
-                        if folder then
-                            for _, obj in pairs(folder:GetChildren()) do
-                                -- Nhận diện token qua tên hoặc qua cấu trúc phần thưởng rơi
-                                if obj.Name == "Token" or obj:IsA("BasePart") or obj:IsA("Model") then
-                                    local part = obj:IsA("Model") and obj.PrimaryPart or obj
-                                    if part and part:IsA("BasePart") then
-                                        local dist = (part.Position - root.Position).Magnitude
-                                        if dist < minDistance then
-                                            minDistance = dist
-                                            targetPos = part.Position
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    
-                    if targetPos then
-                        hum:MoveTo(targetPos)
-                    end
+    while task.wait(0.1) do
+        if _G.AutoFarm then
+            local tool = character:FindFirstChildOfClass("Tool")
+            if tool then
+                tool:Activate() -- Mô phỏng thao tác click chuột để farm
+            else
+                -- Nếu chưa cầm tool trên tay, tự động trang bị từ Balo
+                local backpackTool = player.Backpack:FindFirstChildOfClass("Tool")
+                if backpackTool then
+                    backpackTool.Parent = character
                 end
-            end)
-        end
-    end
-end)
-    while task.wait(0.1) do
-        if _G.AutoDig then
-            pcall(function()
-                vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-                task.wait(0.05)
-                vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-            end)
+            end
         end
     end
 end)
 
--- Vòng lặp xử lý tự động đi bộ nhặt Token/Item rơi
+-- 2. Chức năng Auto Collect Tokens (Nhặt kỹ năng/Vật phẩm)
 task.spawn(function()
     while task.wait(0.2) do
         if _G.AutoCollect then
-            pcall(function()
-                local char = player.Character
-                if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
-                    local root = char.HumanoidRootPart
-                    local hum = char.Humanoid
-                    local targetPos = nil
-                    local shortestDist = 55 -- Phạm vi quét tìm vật phẩm xung quanh nhân vật
+            -- Quét các part trong thư mục Token
+            for _, item in pairs(tokenFolder:GetChildren()) do
+                -- Điều kiện kiểm tra xem có phải token không (Cần chỉnh lại ClassName hoặc Tên tùy game)
+                if item:IsA("Part") and item.Name == "Token" then 
+                    -- Phương pháp 1: Bay đến token để nhặt
+                    teleport(item.CFrame)
+                    task.wait(0.05)
                     
-                    for _, v in pairs(workspace:GetDescendants()) do
-                        if v:IsA("BasePart") and v:FindFirstChild("TouchInterest") and not v.Parent:FindFirstChild("Humanoid") then
-                            local dist = (v.Position - root.Position).Magnitude
-                            if dist < shortestDist then
-                                shortestDist = dist
-                                targetPos = v.Position
-                            end
-                        end
-                    end
-                    
-                    if targetPos then 
-                        hum:MoveTo(targetPos) 
-                    end
+                    -- Phương pháp 2: Nếu game dùng RemoteEvent để nhặt (Tối ưu hơn)
+                    -- game:GetService("ReplicatedStorage").Events.CollectToken:FireServer(item)
                 end
-            end)
+            end
+            -- Sau khi nhặt xong, quay lại vị trí farm
+            if _G.AutoFarm and not _G.ĐangDoiMat then
+                teleport(fieldCFrame)
+            end
         end
     end
 end)
 
-Rayfield:LoadConfiguration()
+-- 3. Chức năng Auto Convert (Tự động về tổ đổi mật khi đầy túi)
+task.spawn(function()
+    while task.wait(1) do
+        if _G.AutoConvert then
+            -- Bạn cần tìm đường dẫn đến UI hiển thị túi phấn hoa của game BSS 1:1
+            -- Ví dụ giả định: player.PlayerGui.Main.Bag.Text = "100/100"
+            local bagGained = 100 -- Thay bằng logic lấy dung lượng thực tế
+            local bagMax = 100    -- Thay bằng logic lấy dung lượng tối đa
+            
+            if bagGained >= bagMax then
+                _G.ĐangDoiMat = true
+                print("Túi đầy! Đang quay về tổ đổi mật...")
+                
+                teleport(hiveCFrame)
+                task.wait(1)
+                
+                -- Kích hoạt sự kiện đổi mật (Cần tìm RemoteEvent cụ thể của game)
+                -- Ví dụ: game:GetService("ReplicatedStorage").Events.MakeHoney:FireServer()
+                
+                task.wait(5) -- Chờ thời gian đổi mật hoàn tất
+                _G.ĐangDoiMat = false
+                teleport(fieldCFrame) -- Quay lại đồng farm
+            end
+        end
+    end
+end)
