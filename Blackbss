@@ -1,805 +1,769 @@
---[[
-    AutoPlay.client.lua
-
-    Dat trong:
-    StarterPlayer > StarterPlayerScripts
-
-    Day la LocalScript tich hop san trong game cua ban.
-    Khong can UI library hoac API ben thu ba.
-]]
+-- LocalScript: Worker Drone AI - Client State Machine
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
-local player = Players.LocalPlayer
-if not player then
-	return
+if not RunService:IsClient() then
+	error("Worker Drone AI phải được chạy bằng LocalScript phía Client.")
 end
 
-local playerGui = player:WaitForChild("PlayerGui")
+local localPlayer = Players.LocalPlayer
 
--- Dung ban script cu neu LocalScript bi chay lai.
-if _G.__SANDBOX_AUTOPLAY_STOP then
-	pcall(_G.__SANDBOX_AUTOPLAY_STOP)
-end
+--==================================================
+-- CẤU HÌNH
+--==================================================
 
---============================================================
--- CONFIGURATION TABLE
---============================================================
+local Configuration = {
+	-- THAY tọa độ này thành vị trí trung tâm cánh đồng cần thu hoạch.
+	FieldPosition = Vector3.new(0, 5, 0),
 
-local Config = {
-	FieldPosition = Vector3.new(100, 5, 200),
-	HivePosition = Vector3.new(0, 5, 0),
-	ToolName = "Collector",
+	-- THAY tọa độ này thành vị trí đứng trước tổ ong.
+	HivePosition = Vector3.new(50, 5, 0),
 
-	MovementSpeed = 35,          -- Stud moi giay
-	ToolActivationDelay = 0.20, -- Khoang cach giua hai lan Activate
-	ProcessingTime = 5,         -- Thoi gian xu ly tai Hive
-	ControlLoopDelay = 0.15,
-	ArrivalDistance = 4,
+	-- THAY bằng tên chính xác của Tool nằm trong Backpack.
+	ToolName = "HarvestTool",
+
+	-- Vận tốc di chuyển nhân vật, tính theo stud/giây.
+	MovementSpeed = 32,
+
+	-- Khoảng cách tối đa trước khi nhân vật được đưa lại về cánh đồng.
+	FieldRepositionDistance = 6,
+
+	-- Khoảng cách được xem là đã đến đích.
+	ArrivalTolerance = 1,
+
+	-- Khoảng nghỉ giữa mỗi lần Tool:Activate().
+	ToolActivationInterval = 0.20,
+
+	-- Bán kính quét Collectible quanh nhân vật.
+	CollectionRadius = 20,
+
+	-- Vận tốc Tween hạt tài nguyên về phía nhân vật.
+	CollectibleTweenSpeed = 65,
+
+	-- Thời gian chờ trước khi quét Collectible lần tiếp theo.
+	CollectionScanInterval = 0.15,
+
+	-- Tránh Tween liên tục cùng một Part nếu nó chưa bị xóa.
+	CollectibleTweenCooldown = 0.75,
+
+	-- Giới hạn Tween đồng thời nhằm tránh gây giật.
+	MaximumConcurrentCollectibleTweens = 12,
+
+	-- Thời gian chờ tại tổ ong.
+	ConversionDuration = 5,
+
+	-- Khoảng nghỉ của vòng lặp State Machine.
+	MainLoopInterval = 0.15,
 }
 
-local State = {
-	OFF = "OFF",
-	WAITING_CHARACTER = "WAITING_CHARACTER",
-	WAITING_DATA = "WAITING_DATA",
-	WAITING_TOOL = "WAITING_TOOL",
-	MOVING_TO_FIELD = "MOVING_TO_FIELD",
-	FARMING = "FARMING",
-	MOVING_TO_HIVE = "MOVING_TO_HIVE",
-	PROCESSING = "PROCESSING",
-}
+assert(Configuration.MovementSpeed > 0, "MovementSpeed phải lớn hơn 0.")
+assert(Configuration.CollectibleTweenSpeed > 0, "CollectibleTweenSpeed phải lớn hơn 0.")
 
-local alive = true
-local autoPlayEnabled = false
-local toolActivationEnabled = false
-local currentState = State.OFF
-local currentTween = nil
-local movementVersion = 0
-local connections = {}
+--==================================================
+-- CÁC TRẠNG THÁI
+--==================================================
 
-local Colors = {
-	Background = Color3.fromRGB(20, 23, 31),
-	Panel = Color3.fromRGB(31, 36, 48),
-	Input = Color3.fromRGB(43, 49, 64),
-	Text = Color3.fromRGB(240, 243, 250),
-	Muted = Color3.fromRGB(172, 180, 198),
-	Blue = Color3.fromRGB(75, 139, 255),
-	Green = Color3.fromRGB(63, 198, 116),
-	Orange = Color3.fromRGB(247, 169, 62),
-	Red = Color3.fromRGB(239, 79, 85),
-}
+local WorkerState = table.freeze({
+	Waiting = "WAITING",
+	MovingToField = "MOVING_TO_FIELD",
+	Farming = "FARM",
+	MovingToHive = "MOVING_TO_HIVE",
+	Converting = "CONVERT",
+})
 
-local function connect(signal, callback)
-	local connection = signal:Connect(callback)
-	table.insert(connections, connection)
-	return connection
-end
+local OperatingMode = table.freeze({
+	Farm = "FARM",
+	Convert = "CONVERT",
+})
 
-local function addCorner(object, radius)
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, radius)
-	corner.Parent = object
-end
+local currentWorkerState = WorkerState.Waiting
+local scriptIsRunning = true
 
-local function addStroke(object, color, transparency)
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = color
-	stroke.Transparency = transparency or 0
-	stroke.Thickness = 1
-	stroke.Parent = object
-end
-
-local function makeLabel(parent, text, position, size, textSize)
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Position = position
-	label.Size = size
-	label.Font = Enum.Font.Gotham
-	label.Text = text
-	label.TextColor3 = Colors.Text
-	label.TextSize = textSize or 14
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = parent
-	return label
-end
-
-local function makeButton(parent, text, position, size, color)
-	local button = Instance.new("TextButton")
-	button.AutoButtonColor = true
-	button.BackgroundColor3 = color or Colors.Blue
-	button.Position = position
-	button.Size = size
-	button.Font = Enum.Font.GothamSemibold
-	button.Text = text
-	button.TextColor3 = Color3.new(1, 1, 1)
-	button.TextSize = 14
-	button.Parent = parent
-	addCorner(button, 8)
-	return button
-end
-
-local function makeTextBox(parent, text, position, size)
-	local box = Instance.new("TextBox")
-	box.BackgroundColor3 = Colors.Input
-	box.Position = position
-	box.Size = size
-	box.ClearTextOnFocus = false
-	box.Font = Enum.Font.Gotham
-	box.PlaceholderColor3 = Colors.Muted
-	box.Text = text
-	box.TextColor3 = Colors.Text
-	box.TextSize = 14
-	box.TextXAlignment = Enum.TextXAlignment.Left
-	box.Parent = parent
-	addCorner(box, 7)
-	addStroke(box, Color3.fromRGB(75, 84, 105), 0.25)
-
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 10)
-	padding.PaddingRight = UDim.new(0, 10)
-	padding.Parent = box
-
-	return box
-end
-
---============================================================
--- NATIVE ROBLOX UI
---============================================================
-
-local oldGui = playerGui:FindFirstChild("SandboxAutoPlayUI")
-if oldGui then
-	oldGui:Destroy()
-end
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "SandboxAutoPlayUI"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = false
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.Parent = playerGui
-
-local panel = Instance.new("Frame")
-panel.Name = "Panel"
-panel.AnchorPoint = Vector2.new(0.5, 0.5)
-panel.BackgroundColor3 = Colors.Background
-panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromOffset(370, 470)
-panel.Parent = gui
-addCorner(panel, 12)
-addStroke(panel, Color3.fromRGB(76, 86, 110), 0.15)
-
-local sizeConstraint = Instance.new("UISizeConstraint")
-sizeConstraint.MinSize = Vector2.new(310, 440)
-sizeConstraint.MaxSize = Vector2.new(390, 500)
-sizeConstraint.Parent = panel
-
-local header = Instance.new("Frame")
-header.Active = true
-header.BackgroundColor3 = Colors.Panel
-header.Size = UDim2.new(1, 0, 0, 44)
-header.Parent = panel
-addCorner(header, 12)
-
-local headerCover = Instance.new("Frame")
-headerCover.BorderSizePixel = 0
-headerCover.BackgroundColor3 = Colors.Panel
-headerCover.Position = UDim2.new(0, 0, 1, -10)
-headerCover.Size = UDim2.new(1, 0, 0, 10)
-headerCover.Parent = header
-
-local title = makeLabel(header, "AUTO-PLAY  |  SANDBOX", UDim2.fromOffset(14, 0), UDim2.new(1, -64, 1, 0), 15)
-title.Font = Enum.Font.GothamBold
-
-local closeButton = makeButton(header, "X", UDim2.new(1, -40, 0, 7), UDim2.fromOffset(30, 30), Colors.Red)
-
-local statusLabel = makeLabel(panel, "Trang thai: Da tat", UDim2.fromOffset(15, 56), UDim2.new(1, -30, 0, 48), 13)
-statusLabel.BackgroundColor3 = Colors.Panel
-statusLabel.BackgroundTransparency = 0
-statusLabel.TextColor3 = Colors.Muted
-statusLabel.TextWrapped = true
-statusLabel.TextXAlignment = Enum.TextXAlignment.Center
-statusLabel.TextYAlignment = Enum.TextYAlignment.Center
-addCorner(statusLabel, 8)
-
-local statsLabel = makeLabel(panel, "Tui: dang tim leaderstats...", UDim2.fromOffset(15, 109), UDim2.new(1, -30, 0, 23), 13)
-statsLabel.TextColor3 = Colors.Muted
-statsLabel.TextXAlignment = Enum.TextXAlignment.Center
-
-local toggleButton = makeButton(panel, "BAT AUTO-PLAY", UDim2.fromOffset(15, 139), UDim2.new(1, -30, 0, 43), Colors.Green)
-
-local fieldButton = makeButton(panel, "DAT FIELD TAI DAY", UDim2.fromOffset(15, 197), UDim2.fromOffset(155, 38), Colors.Blue)
-local fieldPositionLabel = makeLabel(panel, "Field: --", UDim2.fromOffset(180, 197), UDim2.new(1, -195, 0, 38), 12)
-fieldPositionLabel.TextColor3 = Colors.Muted
-fieldPositionLabel.TextWrapped = true
-
-local hiveButton = makeButton(panel, "DAT HIVE TAI DAY", UDim2.fromOffset(15, 243), UDim2.fromOffset(155, 38), Colors.Orange)
-local hivePositionLabel = makeLabel(panel, "Hive: --", UDim2.fromOffset(180, 243), UDim2.new(1, -195, 0, 38), 12)
-hivePositionLabel.TextColor3 = Colors.Muted
-hivePositionLabel.TextWrapped = true
-
-makeLabel(panel, "Ten Tool", UDim2.fromOffset(15, 300), UDim2.fromOffset(105, 35), 13)
-local toolBox = makeTextBox(panel, Config.ToolName, UDim2.fromOffset(120, 296), UDim2.new(1, -135, 0, 38))
-
-makeLabel(panel, "Toc do", UDim2.fromOffset(15, 348), UDim2.fromOffset(105, 35), 13)
-local speedBox = makeTextBox(panel, tostring(Config.MovementSpeed), UDim2.fromOffset(120, 344), UDim2.new(1, -135, 0, 38))
-
-local helpLabel = makeLabel(
-	panel,
-	"1. Dung tai Field roi bam DAT FIELD\n2. Dung tai Hive roi bam DAT HIVE\n3. Nhap dung ten Tool, sau do bat Auto-Play",
-	UDim2.fromOffset(15, 394),
-	UDim2.new(1, -30, 0, 62),
-	12
-)
-helpLabel.TextColor3 = Colors.Muted
-helpLabel.TextWrapped = true
-helpLabel.TextYAlignment = Enum.TextYAlignment.Top
-
--- Keo menu bang chuot hoac cam ung.
-local dragging = false
-local dragStart = nil
-local startPosition = nil
-
-connect(header.InputBegan, function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPosition = panel.Position
-	end
-end)
-
-connect(header.InputEnded, function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = false
-	end
-end)
-
-connect(UserInputService.InputChanged, function(input)
-	if not dragging or not dragStart or not startPosition then
+local function changeWorkerState(nextState)
+	if currentWorkerState == nextState then
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseMovement
-		or input.UserInputType == Enum.UserInputType.Touch then
-		local delta = input.Position - dragStart
-		panel.Position = UDim2.new(
-			startPosition.X.Scale,
-			startPosition.X.Offset + delta.X,
-			startPosition.Y.Scale,
-			startPosition.Y.Offset + delta.Y
-		)
+	currentWorkerState = nextState
+
+	if script.Parent then
+		script:SetAttribute("WorkerDroneState", nextState)
 	end
-end)
-
---============================================================
--- DATA, CHARACTER, TOOL
---============================================================
-
-local function setStatus(text, color)
-	if not alive or not statusLabel.Parent then
-		return
-	end
-	statusLabel.Text = text
-	statusLabel.TextColor3 = color or Colors.Text
 end
 
-local function setState(newState, message, color)
-	currentState = newState
-	setStatus(message, color)
-end
+script:SetAttribute("WorkerDroneState", currentWorkerState)
 
-local function formatPosition(position)
-	return string.format("%.1f, %.1f, %.1f", position.X, position.Y, position.Z)
-end
+--==================================================
+-- ĐỌC DỮ LIỆU LEADERSTATS
+-- Hỗ trợ cả NumberValue/IntValue và Attribute.
+--==================================================
 
-local function refreshPositionLabels()
-	fieldPositionLabel.Text = "Field: " .. formatPosition(Config.FieldPosition)
-	hivePositionLabel.Text = "Hive: " .. formatPosition(Config.HivePosition)
-end
+local function readNumericStat(statName)
+	local leaderstats = localPlayer:FindFirstChild("leaderstats")
 
-refreshPositionLabels()
-
-local function getRig()
-	local character = player.Character
-	if not character then
-		return nil, nil, nil
-	end
-
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local root = character:FindFirstChild("HumanoidRootPart")
-	if not humanoid or not root or not root:IsA("BasePart") then
-		return character, nil, nil
-	end
-
-	return character, humanoid, root
-end
-
-local function getLeaderstats()
-	return player:FindFirstChild("leaderstats")
-end
-
--- Ho tro ca IntValue/NumberValue va Attribute tren leaderstats.
-local function readStat(statName)
-	local leaderstats = getLeaderstats()
 	if not leaderstats then
-		return nil, "Khong tim thay leaderstats"
+		return nil
 	end
 
-	local valueObject = leaderstats:FindFirstChild(statName)
-	if valueObject and valueObject:IsA("ValueBase") then
-		local value = valueObject.Value
-		if type(value) == "number" then
-			return value, nil
-		end
+	local statObject = leaderstats:FindFirstChild(statName)
+
+	if statObject and
+		(statObject:IsA("NumberValue") or statObject:IsA("IntValue")) then
+		return statObject.Value
 	end
 
 	local attributeValue = leaderstats:GetAttribute(statName)
-	if type(attributeValue) == "number" then
-		return attributeValue, nil
+
+	if typeof(attributeValue) == "number" then
+		return attributeValue
 	end
 
-	return nil, "Thieu du lieu " .. statName
+	return nil
 end
 
-local function readBag()
-	local current, currentError = readStat("Current")
-	if current == nil then
-		return nil, nil, currentError
+local function determineOperatingMode()
+	local pollen = readNumericStat("Pollen")
+	local capacity = readNumericStat("Capacity")
+
+	if pollen == nil or capacity == nil or capacity <= 0 then
+		return nil, pollen, capacity
 	end
 
-	local capacity, capacityError = readStat("Capacity")
-	if capacity == nil then
-		return nil, nil, capacityError
+	if pollen < capacity then
+		return OperatingMode.Farm, pollen, capacity
 	end
 
-	return current, capacity, nil
+	return OperatingMode.Convert, pollen, capacity
 end
 
-local function writeCurrent(newValue)
-	local leaderstats = getLeaderstats()
-	if not leaderstats then
+local function currentModeIs(expectedMode)
+	local currentMode = determineOperatingMode()
+	return currentMode == expectedMode
+end
+
+--==================================================
+-- LẤY CHARACTER, HUMANOID VÀ ROOT PART
+--==================================================
+
+local function getCharacterContext()
+	local character = localPlayer.Character
+
+	if not character or not character.Parent then
+		return nil, nil, nil, nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+
+	if not humanoid or
+		not humanoidRootPart or
+		not humanoidRootPart:IsA("BasePart") then
+		return character, humanoid, nil, nil
+	end
+
+	local characterPrimaryPart = character.PrimaryPart or humanoidRootPart
+
+	return character, humanoid, humanoidRootPart, characterPrimaryPart
+end
+
+--==================================================
+-- HỆ THỐNG TWEEN DI CHUYỂN NHÂN VẬT
+--==================================================
+
+local activeMovementTween = nil
+local movementRevision = 0
+
+local function cancelActiveMovement()
+	movementRevision += 1
+
+	if activeMovementTween then
+		pcall(function()
+			activeMovementTween:Cancel()
+		end)
+
+		activeMovementTween = nil
+	end
+end
+
+local function tweenCharacterTo(targetPosition, abortCondition)
+	local character, humanoid, humanoidRootPart = getCharacterContext()
+
+	if not character or
+		not humanoid or
+		not humanoidRootPart or
+		humanoid.Health <= 0 then
 		return false
 	end
 
-	local valueObject = leaderstats:FindFirstChild("Current")
-	if valueObject and valueObject:IsA("ValueBase") then
-		valueObject.Value = newValue
+	cancelActiveMovement()
+	local thisMovementRevision = movementRevision
+
+	local distance = (humanoidRootPart.Position - targetPosition).Magnitude
+	local rotationOnly = humanoidRootPart.CFrame - humanoidRootPart.Position
+	local targetCFrame = CFrame.new(targetPosition) * rotationOnly
+
+	if distance <= Configuration.ArrivalTolerance then
+		pcall(function()
+			humanoidRootPart.CFrame = targetCFrame
+			humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+			humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
+		end)
+
 		return true
 	end
 
-	if leaderstats:GetAttribute("Current") ~= nil then
-		leaderstats:SetAttribute("Current", newValue)
-		return true
+	local movementDuration = math.max(
+		distance / Configuration.MovementSpeed,
+		0.05
+	)
+
+	local movementTween = TweenService:Create(
+		humanoidRootPart,
+		TweenInfo.new(
+			movementDuration,
+			Enum.EasingStyle.Linear,
+			Enum.EasingDirection.Out
+		),
+		{
+			CFrame = targetCFrame,
+		}
+	)
+
+	activeMovementTween = movementTween
+
+	local originalAutoRotate = humanoid.AutoRotate
+	humanoid.AutoRotate = false
+	humanoid:Move(Vector3.zero, false)
+
+	pcall(function()
+		humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+		humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
+	end)
+
+	local movementFinished = false
+	local completedPlaybackState = nil
+
+	local completedConnection = movementTween.Completed:Connect(function(playbackState)
+		completedPlaybackState = playbackState
+		movementFinished = true
+	end)
+
+	local playedSuccessfully, playError = pcall(function()
+		movementTween:Play()
+	end)
+
+	if not playedSuccessfully then
+		completedConnection:Disconnect()
+
+		if activeMovementTween == movementTween then
+			activeMovementTween = nil
+		end
+
+		if humanoid.Parent then
+			humanoid.AutoRotate = originalAutoRotate
+		end
+
+		warn("Không thể chạy Tween di chuyển:", playError)
+		return false
 	end
 
-	return false
-end
+	local movementTimeout = os.clock() + movementDuration + 2
 
-local function isBagFull()
-	local current, capacity = readBag()
-	return current ~= nil and capacity ~= nil and capacity > 0 and current >= capacity
-end
+	while scriptIsRunning and not movementFinished do
+		local shouldAbort =
+			movementRevision ~= thisMovementRevision
+			or not humanoidRootPart.Parent
+			or humanoid.Health <= 0
+			or os.clock() >= movementTimeout
 
-local function findTool()
-	local character = player.Character
-	local backpack = player:FindFirstChildOfClass("Backpack")
-	local wantedName = string.lower(Config.ToolName)
+		if not shouldAbort and abortCondition then
+			local conditionSucceeded, conditionResult = pcall(abortCondition)
 
-	for _, container in ipairs({character, backpack}) do
-		if container then
-			local exactTool = container:FindFirstChild(Config.ToolName)
-			if exactTool and exactTool:IsA("Tool") then
-				return exactTool
+			if not conditionSucceeded or conditionResult == true then
+				shouldAbort = true
 			end
+		end
 
-			for _, child in ipairs(container:GetChildren()) do
-				if child:IsA("Tool") and string.lower(child.Name) == wantedName then
-					return child
-				end
-			end
+		if shouldAbort then
+			pcall(function()
+				movementTween:Cancel()
+			end)
+
+			break
+		end
+
+		task.wait(0.05)
+	end
+
+	if not movementFinished then
+		pcall(function()
+			movementTween:Cancel()
+		end)
+
+		local cancellationTimeout = os.clock() + 0.25
+
+		while not movementFinished and os.clock() < cancellationTimeout do
+			task.wait()
 		end
 	end
 
-	return nil
-end
+	completedConnection:Disconnect()
 
-local function equipTool()
-	local character, humanoid = getRig()
-	if not character or not humanoid or humanoid.Health <= 0 then
-		return nil
-	end
-
-	local tool = findTool()
-	if not tool then
-		return nil
-	end
-
-	if tool.Parent ~= character then
-		humanoid:EquipTool(tool)
-		task.wait(0.05)
-	end
-
-	if tool.Parent == character then
-		return tool
-	end
-
-	return nil
-end
-
-local function stopTool()
-	toolActivationEnabled = false
-	local tool = findTool()
-	if tool then
-		pcall(function()
-			tool:Deactivate()
-		end)
-	end
-end
-
---============================================================
--- TWEEN MOVEMENT
---============================================================
-
-local function cancelMovement()
-	movementVersion = movementVersion + 1
-	if currentTween then
-		pcall(function()
-			currentTween:Cancel()
-		end)
-		currentTween = nil
-	end
-end
-
-local function tweenTo(targetPosition)
-	local _, humanoid, root = getRig()
-	if not humanoid or not root or humanoid.Health <= 0 then
-		return false
-	end
-
-	cancelMovement()
-	local thisMovement = movementVersion
-	local distance = (root.Position - targetPosition).Magnitude
-	if distance <= Config.ArrivalDistance then
-		return true
-	end
-
-	local speed = math.max(Config.MovementSpeed, 1)
-	local duration = math.max(distance / speed, 0.05)
-	local targetCFrame = CFrame.new(targetPosition) * root.CFrame.Rotation
-	local oldAutoRotate = humanoid.AutoRotate
-
-	humanoid.AutoRotate = false
-	root.AssemblyLinearVelocity = Vector3.zero
-	root.AssemblyAngularVelocity = Vector3.zero
-
-	local tween = TweenService:Create(
-		root,
-		TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
-		{CFrame = targetCFrame}
-	)
-
-	currentTween = tween
-	local finished = false
-	local result = Enum.PlaybackState.Cancelled
-	local completedConnection
-
-	completedConnection = tween.Completed:Connect(function(playbackState)
-		result = playbackState
-		finished = true
-	end)
-
-	tween:Play()
-
-	while alive and autoPlayEnabled and thisMovement == movementVersion and not finished do
-		task.wait(0.05)
-	end
-
-	if not finished then
-		pcall(function()
-			tween:Cancel()
-		end)
-	end
-
-	if completedConnection then
-		completedConnection:Disconnect()
-	end
-
-	if currentTween == tween then
-		currentTween = nil
+	if activeMovementTween == movementTween then
+		activeMovementTween = nil
 	end
 
 	if humanoid.Parent then
-		humanoid.AutoRotate = oldAutoRotate
+		humanoid.AutoRotate = originalAutoRotate
 	end
 
-	if root.Parent then
-		root.AssemblyLinearVelocity = Vector3.zero
-		root.AssemblyAngularVelocity = Vector3.zero
+	local movementCompleted =
+		movementFinished
+		and completedPlaybackState == Enum.PlaybackState.Completed
+		and movementRevision == thisMovementRevision
+
+	if movementCompleted and humanoidRootPart.Parent then
+		pcall(function()
+			humanoidRootPart.CFrame = targetCFrame
+			humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+			humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
+		end)
 	end
 
-	return result == Enum.PlaybackState.Completed
-		and alive
-		and autoPlayEnabled
-		and thisMovement == movementVersion
+	return movementCompleted
 end
 
---============================================================
--- UI ACTIONS AND SHUTDOWN
---============================================================
+--==================================================
+-- HỆ THỐNG TỰ ĐỘNG TRANG BỊ VÀ KÍCH HOẠT TOOL
+--==================================================
 
-local function updateToggleAppearance()
-	if autoPlayEnabled then
-		toggleButton.Text = "TAT AUTO-PLAY"
-		toggleButton.BackgroundColor3 = Colors.Red
-	else
-		toggleButton.Text = "BAT AUTO-PLAY"
-		toggleButton.BackgroundColor3 = Colors.Green
+local toolSystemEnabled = false
+local toolWorkerRevision = 0
+
+local function findConfiguredTool(character)
+	if character then
+		local equippedTool = character:FindFirstChild(Configuration.ToolName)
+
+		if equippedTool and equippedTool:IsA("Tool") then
+			return equippedTool
+		end
+	end
+
+	local backpack = localPlayer:FindFirstChild("Backpack")
+
+	if backpack then
+		local backpackTool = backpack:FindFirstChild(Configuration.ToolName)
+
+		if backpackTool and backpackTool:IsA("Tool") then
+			return backpackTool
+		end
+	end
+
+	return nil
+end
+
+local function stopToolSystem()
+	toolSystemEnabled = false
+	toolWorkerRevision += 1
+
+	local character = localPlayer.Character
+	local configuredTool = findConfiguredTool(character)
+
+	if configuredTool then
+		pcall(function()
+			configuredTool:Deactivate()
+		end)
+
+		local backpack = localPlayer:FindFirstChild("Backpack")
+
+		if backpack and character and configuredTool.Parent == character then
+			pcall(function()
+				configuredTool.Parent = backpack
+			end)
+		end
 	end
 end
 
-local function applyInputs()
-	local trimmedToolName = string.match(toolBox.Text, "^%s*(.-)%s*$") or ""
-	if trimmedToolName == "" then
-		setStatus("Loi: Hay nhap ten Tool", Colors.Red)
+local function startToolSystem()
+	if toolSystemEnabled then
+		return
+	end
+
+	toolSystemEnabled = true
+	toolWorkerRevision += 1
+
+	local thisToolWorkerRevision = toolWorkerRevision
+
+	task.spawn(function()
+		while scriptIsRunning
+			and toolSystemEnabled
+			and toolWorkerRevision == thisToolWorkerRevision do
+
+			local character, humanoid = getCharacterContext()
+
+			if character and humanoid and humanoid.Health > 0 then
+				local configuredTool = findConfiguredTool(character)
+
+				if configuredTool then
+					if configuredTool.Parent ~= character then
+						pcall(function()
+							humanoid:EquipTool(configuredTool)
+						end)
+
+						task.wait(0.05)
+					end
+
+					if configuredTool.Parent == character then
+						pcall(function()
+							configuredTool:Activate()
+						end)
+					end
+				end
+			end
+
+			task.wait(math.max(
+				Configuration.ToolActivationInterval,
+				0.03
+			))
+		end
+	end)
+end
+
+--==================================================
+-- HỆ THỐNG QUÉT VÀ TWEEN COLLECTIBLE
+--==================================================
+
+local collectorSystemEnabled = false
+local collectorWorkerRevision = 0
+
+local activeCollectibleTweens = setmetatable({}, {
+	__mode = "k",
+})
+
+local collectibleLastTweenTime = setmetatable({}, {
+	__mode = "k",
+})
+
+local function countActiveCollectibleTweens()
+	local activeCount = 0
+
+	for collectiblePart in pairs(activeCollectibleTweens) do
+		if collectiblePart.Parent then
+			activeCount += 1
+		else
+			activeCollectibleTweens[collectiblePart] = nil
+		end
+	end
+
+	return activeCount
+end
+
+local function tweenCollectibleToCharacter(
+	collectiblePart,
+	humanoidRootPart
+)
+	if activeCollectibleTweens[collectiblePart] then
 		return false
 	end
 
-	local speed = tonumber(speedBox.Text)
-	if not speed then
-		setStatus("Loi: Toc do phai la mot con so", Colors.Red)
+	local currentTime = os.clock()
+	local previousTweenTime = collectibleLastTweenTime[collectiblePart]
+
+	if previousTweenTime and
+		currentTime - previousTweenTime
+			< Configuration.CollectibleTweenCooldown then
 		return false
 	end
 
-	Config.ToolName = trimmedToolName
-	Config.MovementSpeed = math.clamp(speed, 5, 200)
-	speedBox.Text = tostring(Config.MovementSpeed)
+	if not collectiblePart.Parent or not humanoidRootPart.Parent then
+		return false
+	end
+
+	local distance = (
+		collectiblePart.Position - humanoidRootPart.Position
+	).Magnitude
+
+	if distance > Configuration.CollectionRadius then
+		return false
+	end
+
+	local tweenDuration = math.max(
+		distance / Configuration.CollectibleTweenSpeed,
+		0.05
+	)
+
+	local collectibleRotation = (
+		collectiblePart.CFrame - collectiblePart.Position
+	)
+
+	local targetCFrame =
+		CFrame.new(humanoidRootPart.Position)
+		* collectibleRotation
+
+	local creationSucceeded, collectibleTween = pcall(function()
+		return TweenService:Create(
+			collectiblePart,
+			TweenInfo.new(
+				tweenDuration,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			),
+			{
+				CFrame = targetCFrame,
+			}
+		)
+	end)
+
+	if not creationSucceeded or not collectibleTween then
+		return false
+	end
+
+	collectibleLastTweenTime[collectiblePart] = currentTime
+	activeCollectibleTweens[collectiblePart] = collectibleTween
+
+	task.spawn(function()
+		pcall(function()
+			collectibleTween:Play()
+			collectibleTween.Completed:Wait()
+		end)
+
+		if activeCollectibleTweens[collectiblePart]
+			== collectibleTween then
+			activeCollectibleTweens[collectiblePart] = nil
+		end
+	end)
+
 	return true
 end
 
-local function setAutoPlay(enabled)
-	if enabled and not applyInputs() then
-		return
-	end
+local function stopCollectorSystem()
+	collectorSystemEnabled = false
+	collectorWorkerRevision += 1
 
-	autoPlayEnabled = enabled
-	updateToggleAppearance()
-
-	if not enabled then
-		stopTool()
-		cancelMovement()
-		setState(State.OFF, "Trang thai: Da tat", Colors.Muted)
-	else
-		setState(State.WAITING_CHARACTER, "Dang khoi dong Auto-Play...", Colors.Orange)
+	for _, collectibleTween in pairs(activeCollectibleTweens) do
+		pcall(function()
+			collectibleTween:Cancel()
+		end)
 	end
 end
 
-local function shutdown()
-	if not alive then
+local function startCollectorSystem()
+	if collectorSystemEnabled then
 		return
 	end
 
-	alive = false
-	autoPlayEnabled = false
-	stopTool()
-	cancelMovement()
+	collectorSystemEnabled = true
+	collectorWorkerRevision += 1
 
-	for _, connection in ipairs(connections) do
-		connection:Disconnect()
-	end
-	table.clear(connections)
+	local thisCollectorWorkerRevision = collectorWorkerRevision
 
-	if gui and gui.Parent then
-		gui:Destroy()
-	end
-end
+	task.spawn(function()
+		while scriptIsRunning
+			and collectorSystemEnabled
+			and collectorWorkerRevision == thisCollectorWorkerRevision do
 
-_G.__SANDBOX_AUTOPLAY_STOP = shutdown
+			local _, humanoid, humanoidRootPart, characterPrimaryPart =
+				getCharacterContext()
 
-connect(toggleButton.Activated, function()
-	setAutoPlay(not autoPlayEnabled)
-end)
+			if humanoid
+				and humanoid.Health > 0
+				and humanoidRootPart
+				and characterPrimaryPart then
 
-connect(fieldButton.Activated, function()
-	local _, _, root = getRig()
-	if not root then
-		setStatus("Khong tim thay HumanoidRootPart", Colors.Red)
-		return
-	end
+				local collectiblesFolder =
+					Workspace:FindFirstChild("Collectibles")
 
-	Config.FieldPosition = root.Position
-	refreshPositionLabels()
-	setStatus("Da luu vi tri Field", Colors.Green)
-end)
+				if collectiblesFolder then
+					local availableTweenSlots =
+						Configuration.MaximumConcurrentCollectibleTweens
+						- countActiveCollectibleTweens()
 
-connect(hiveButton.Activated, function()
-	local _, _, root = getRig()
-	if not root then
-		setStatus("Khong tim thay HumanoidRootPart", Colors.Red)
-		return
-	end
+					if availableTweenSlots > 0 then
+						for _, collectiblePart
+							in ipairs(collectiblesFolder:GetDescendants()) do
 
-	Config.HivePosition = root.Position
-	refreshPositionLabels()
-	setStatus("Da luu vi tri Hive", Colors.Green)
-end)
+							if not collectorSystemEnabled
+								or collectorWorkerRevision
+									~= thisCollectorWorkerRevision then
+								break
+							end
 
-connect(toolBox.FocusLost, function()
-	applyInputs()
-end)
+							if collectiblePart:IsA("BasePart")
+								and collectiblePart.Parent
+								and collectiblePart ~= humanoidRootPart then
 
-connect(speedBox.FocusLost, function()
-	applyInputs()
-end)
+								local distanceFromCharacter = (
+									collectiblePart.Position
+									- characterPrimaryPart.Position
+								).Magnitude
 
-connect(closeButton.Activated, function()
-	shutdown()
-	if _G.__SANDBOX_AUTOPLAY_STOP == shutdown then
-		_G.__SANDBOX_AUTOPLAY_STOP = nil
-	end
-end)
+								if distanceFromCharacter
+									<= Configuration.CollectionRadius then
 
-connect(player.CharacterAdded, function()
-	stopTool()
-	cancelMovement()
-	if autoPlayEnabled then
-		setState(State.WAITING_CHARACTER, "Nhan vat vua hoi sinh, dang doi tai...", Colors.Orange)
-	end
-end)
+									local tweenStarted =
+										tweenCollectibleToCharacter(
+											collectiblePart,
+											humanoidRootPart
+										)
 
---============================================================
--- TOOL ACTIVATION THREAD
---============================================================
+									if tweenStarted then
+										availableTweenSlots -= 1
 
-task.spawn(function()
-	while alive do
-		if autoPlayEnabled
-			and toolActivationEnabled
-			and currentState == State.FARMING
-			and not isBagFull() then
-			local tool = equipTool()
-			if tool then
-				local success, activationError = pcall(function()
-					tool:Activate()
-				end)
-
-				if not success then
-					setStatus("Tool Activate bi loi: " .. tostring(activationError), Colors.Red)
+										if availableTweenSlots <= 0 then
+											break
+										end
+									end
+								end
+							end
+						end
+					end
 				end
 			end
+
+			task.wait(math.max(
+				Configuration.CollectionScanInterval,
+				0.05
+			))
 		end
-
-		task.wait(Config.ToolActivationDelay)
-	end
-end)
-
--- Hien du lieu tui lien tuc tren menu.
-task.spawn(function()
-	while alive do
-		local current, capacity, dataError = readBag()
-		if current ~= nil and capacity ~= nil then
-			statsLabel.Text = string.format("Tui: %s / %s", tostring(current), tostring(capacity))
-		else
-			statsLabel.Text = "Tui: " .. tostring(dataError)
-		end
-		task.wait(0.25)
-	end
-end)
-
---============================================================
--- MAIN CONTROL STATE MACHINE
---============================================================
-
-local function controlCycle()
-	if not autoPlayEnabled then
-		task.wait(0.20)
-		return
-	end
-
-	local _, humanoid, root = getRig()
-	if not humanoid or not root or humanoid.Health <= 0 then
-		stopTool()
-		setState(State.WAITING_CHARACTER, "Dang doi Character/HumanoidRootPart...", Colors.Orange)
-		task.wait(0.50)
-		return
-	end
-
-	local current, capacity, dataError = readBag()
-	if current == nil or capacity == nil then
-		stopTool()
-		setState(State.WAITING_DATA, "Loi du lieu: " .. tostring(dataError), Colors.Red)
-		task.wait(0.75)
-		return
-	end
-
-	if capacity <= 0 then
-		stopTool()
-		setState(State.WAITING_DATA, "Capacity phai lon hon 0", Colors.Red)
-		task.wait(0.75)
-		return
-	end
-
-	if current >= capacity then
-		stopTool()
-
-		if (root.Position - Config.HivePosition).Magnitude > Config.ArrivalDistance then
-			setState(State.MOVING_TO_HIVE, "Tui day - dang ve Hive...", Colors.Orange)
-			if not tweenTo(Config.HivePosition) then
-				task.wait(Config.ControlLoopDelay)
-				return
-			end
-		end
-
-		if not autoPlayEnabled then
-			return
-		end
-
-		setState(State.PROCESSING, "Dang xu ly tai Hive...", Colors.Orange)
-		local finishTime = os.clock() + Config.ProcessingTime
-
-		while alive and autoPlayEnabled and os.clock() < finishTime do
-			local secondsLeft = math.max(0, math.ceil(finishTime - os.clock()))
-			setStatus("Dang xu ly tai Hive: " .. secondsLeft .. " giay", Colors.Orange)
-			task.wait(0.20)
-		end
-
-		if autoPlayEnabled then
-			if writeCurrent(0) then
-				setStatus("Da xu ly xong - chuan bi quay lai Field", Colors.Green)
-			else
-				setStatus("Khong the reset Current", Colors.Red)
-			end
-		end
-
-		task.wait(Config.ControlLoopDelay)
-		return
-	end
-
-	if (root.Position - Config.FieldPosition).Magnitude > Config.ArrivalDistance then
-		stopTool()
-		setState(State.MOVING_TO_FIELD, "Dang di chuyen den Field...", Colors.Blue)
-		tweenTo(Config.FieldPosition)
-		task.wait(Config.ControlLoopDelay)
-		return
-	end
-
-	if isBagFull() then
-		stopTool()
-		task.wait(Config.ControlLoopDelay)
-		return
-	end
-
-	local tool = findTool()
-	if not tool then
-		stopTool()
-		setState(
-			State.WAITING_TOOL,
-			"Khong tim thay Tool: " .. Config.ToolName .. " trong Backpack",
-			Colors.Red
-		)
-		task.wait(0.75)
-		return
-	end
-
-	currentState = State.FARMING
-	toolActivationEnabled = true
-	setStatus("Dang thu thap tai Field bang " .. tool.Name, Colors.Green)
-	task.wait(Config.ControlLoopDelay)
+	end)
 end
 
-task.spawn(function()
-	while alive do
-		local success, cycleError = xpcall(controlCycle, debug.traceback)
-		if not success then
-			setAutoPlay(false)
-			setStatus("SCRIPT ERROR: " .. tostring(cycleError), Colors.Red)
-			warn("[Sandbox AutoPlay] " .. tostring(cycleError))
-			task.wait(1)
-		end
-	end
+--==================================================
+-- XỬ LÝ RESPAWN VÀ DỪNG SCRIPT
+--==================================================
+
+localPlayer.CharacterAdded:Connect(function()
+	stopToolSystem()
+	stopCollectorSystem()
+	cancelActiveMovement()
+	changeWorkerState(WorkerState.Waiting)
 end)
 
-setStatus("Menu da san sang - hay cai dat Field va Hive", Colors.Green)
+script.Destroying:Connect(function()
+	scriptIsRunning = false
+	stopToolSystem()
+	stopCollectorSystem()
+	cancelActiveMovement()
+end)
 
+--==================================================
+-- VÒNG LẶP STATE MACHINE TRUNG TÂM
+--==================================================
+
+local missingStatsWarningDisplayed = false
+
+local function runMainControlLoop()
+	while scriptIsRunning do
+		local desiredMode = determineOperatingMode()
+
+		if desiredMode == nil then
+			if currentWorkerState ~= WorkerState.Waiting then
+				stopToolSystem()
+				stopCollectorSystem()
+				cancelActiveMovement()
+				changeWorkerState(WorkerState.Waiting)
+			end
+
+			if not missingStatsWarningDisplayed then
+				missingStatsWarningDisplayed = true
+
+				warn(
+					"Worker Drone đang chờ leaderstats.Pollen "
+					.. "và leaderstats.Capacity."
+				)
+			end
+
+		elseif desiredMode == OperatingMode.Farm then
+			missingStatsWarningDisplayed = false
+
+			local _, humanoid, humanoidRootPart =
+				getCharacterContext()
+
+			local characterIsAtField =
+				humanoid
+				and humanoid.Health > 0
+				and humanoidRootPart
+				and (
+					humanoidRootPart.Position
+					- Configuration.FieldPosition
+				).Magnitude
+					<= Configuration.FieldRepositionDistance
+
+			if currentWorkerState ~= WorkerState.Farming
+				or not characterIsAtField then
+
+				stopToolSystem()
+				stopCollectorSystem()
+				changeWorkerState(WorkerState.MovingToField)
+
+				local reachedField = tweenCharacterTo(
+					Configuration.FieldPosition,
+					function()
+						return not currentModeIs(OperatingMode.Farm)
+					end
+				)
+
+				if reachedField
+					and currentModeIs(OperatingMode.Farm) then
+
+					changeWorkerState(WorkerState.Farming)
+					startToolSystem()
+					startCollectorSystem()
+				else
+					changeWorkerState(WorkerState.Waiting)
+				end
+			else
+				startToolSystem()
+				startCollectorSystem()
+			end
+
+		elseif desiredMode == OperatingMode.Convert then
+			missingStatsWarningDisplayed = false
+
+			-- Ngừng Tool và Collector ngay khi Capacity đầy.
+			stopToolSystem()
+			stopCollectorSystem()
+
+			changeWorkerState(WorkerState.MovingToHive)
+
+			local reachedHive = tweenCharacterTo(
+				Configuration.HivePosition,
+				function()
+					return not currentModeIs(OperatingMode.Convert)
+				end
+			)
+
+			if reachedHive
+				and currentModeIs(OperatingMode.Convert) then
+
+				changeWorkerState(WorkerState.Converting)
+
+				local conversionEndTime =
+					os.clock() + Configuration.ConversionDuration
+
+				while scriptIsRunning
+					and os.clock() < conversionEndTime do
+
+					local remainingTime =
+						conversionEndTime - os.clock()
+
+					task.wait(math.min(0.10, remainingTime))
+				end
+			end
+
+			if scriptIsRunning then
+				changeWorkerState(WorkerState.Waiting)
+			end
+		end
+
+		task.wait(math.max(
+			Configuration.MainLoopInterval,
+			0.05
+		))
+	end
+end
+
+runMainControlLoop()
