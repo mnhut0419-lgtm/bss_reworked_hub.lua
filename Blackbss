@@ -40,11 +40,13 @@ local Config = {
     MaximumReachDistance = 4.5,
     MoveTimeoutBuffer = 1.5,
     MaximumMoveTimeout = 8,
+    StuckCheckSeconds = 1.25,
+    StuckMovementThreshold = 0.75,
 
     ReturnTimeout = 14,
     ReturnDistance = 5,
     VisitedCooldown = 12,
-    FailedCooldown = 6,
+    FailedCooldown = 15,
     PatrolMoveTime = 4,
     PatrolSwitchDistance = 6,
     MaximumPatrolSwitchDistance = 18,
@@ -643,9 +645,10 @@ local function walkThroughTarget(target, humanoid, root)
 
     applyCustomSpeed(humanoid, true)
 
+    local startedAt = os.clock()
     local initialSpeed = math.max(humanoid.WalkSpeed, 1)
     local initialDistance = (initialPosition - root.Position).Magnitude
-    local deadline = os.clock() + math.clamp(
+    local deadline = startedAt + math.clamp(
         initialDistance / initialSpeed + Config.MoveTimeoutBuffer,
         1.5,
         Config.MaximumMoveTimeout
@@ -653,6 +656,8 @@ local function walkThroughTarget(target, humanoid, root)
 
     local previousGoal = nil
     local previousRootPosition = root.Position
+    local lastMovementCheckAt = startedAt
+    local lastMovementCheckPosition = root.Position
 
     while Enabled and os.clock() < deadline do
         applyCustomSpeed(humanoid, false)
@@ -676,7 +681,7 @@ local function walkThroughTarget(target, humanoid, root)
             return false
         end
 
-        local speed, passThroughDistance, reachDistance = getAdaptiveMovement(humanoid)
+        local _, passThroughDistance, reachDistance = getAdaptiveMovement(humanoid)
         local difference = targetPosition - root.Position
         local distance = difference.Magnitude
         local movementGoal = targetPosition
@@ -703,14 +708,22 @@ local function walkThroughTarget(target, humanoid, root)
             return true
         end
 
-        previousRootPosition = root.Position
+        local now = os.clock()
+        if now - lastMovementCheckAt >= Config.StuckCheckSeconds then
+            local movedDistance = horizontalDistance(
+                root.Position,
+                lastMovementCheckPosition
+            )
 
-        local remainingDistance = (targetPosition - root.Position).Magnitude
-        local requiredTime = remainingDistance / math.max(speed, 1)
-        deadline = math.max(
-            deadline,
-            os.clock() + math.min(requiredTime + 0.5, Config.MaximumMoveTimeout)
-        )
+            -- Muc tieu con xa nhung nhan vat gan nhu khong di: bo muc tieu.
+            if movedDistance < Config.StuckMovementThreshold then
+                return false
+            end
+            lastMovementCheckAt = now
+            lastMovementCheckPosition = root.Position
+        end
+
+        previousRootPosition = root.Position
 
         task.wait(Config.UpdateInterval)
     end
@@ -726,7 +739,7 @@ local function returnToZoneCenter(character, humanoid, root)
     applyCustomSpeed(humanoid, true)
 
     local centerGoal = getGroundPosition(ZoneCenter, character)
-        humanoid:MoveTo(centerGoal)
+    humanoid:MoveTo(centerGoal)
     local deadline = os.clock() + Config.ReturnTimeout
 
     while Enabled and os.clock() < deadline do
@@ -1365,7 +1378,7 @@ task.spawn(function()
                     task.wait(Config.SwingHoldSeconds)
 
                     if HeldSwingTool == tool then
-              pcall(function()
+                        pcall(function()
                             tool:Deactivate()
                         end)
                         HeldSwingTool = nil
