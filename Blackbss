@@ -1,109 +1,148 @@
--- Tải thư viện giao diện cao cấp (Giống Atlas Hub)
+-- =====================================================================
+-- ATLAS CORE ARCHITECTURE - BSS 1:1 ADAPTATION
+-- Framework: Rayfield | Logic: Real-time Caching & Tween Gliding
+-- =====================================================================
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-   Name = "🐝 Atlas Hub | BSS 1:1",
-   LoadingTitle = "Đang tải Atlas Hub...",
-   LoadingSubtitle = "Tối ưu cho Delta Mobile",
+   Name = "🐝 Atlas Core | BSS 1:1",
+   LoadingTitle = "Khởi chạy lõi Atlas...",
+   LoadingSubtitle = "Đã điều chỉnh cho Fanmade Server",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false
 })
 
--- [ CÁC BIẾN TOÀN CỤC ]
-local _G = getgenv and getgenv() or _G
-_G.Atlas_AutoFarm = false
-_G.Atlas_AutoCollect = false
-_G.Atlas_WalkSpeed = 40
-_G.HiveLocation = nil
+local _G_Atlas = {
+    Farming = false,
+    Collecting = false,
+    GlideSpeed = 60,
+    TokenRadius = 80,
+    HiveCFrame = nil,
+    Blacklist = {},
+    CurrentTarget = nil
+}
 
-local player = game.Players.LocalPlayer
-local virtualUser = game:GetService("VirtualUser")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local LocalPlayer = Players.LocalPlayer
 
--- [ CHỐNG AFK TRÁNH VĂNG GAME ]
-player.Idled:Connect(function()
-    virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-    task.wait(1)
-    virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+-- [ ANTI-AFK HỆ THỐNG ]
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- [ TẠO CÁC TAB CHỨC NĂNG ]
-local MainTab = Window:CreateTab("Auto Farm & Nhặt", 4483362458)
-local HiveTab = Window:CreateTab("Tổ & Đổi Mật", 4483362458)
+-- [ GIAO DIỆN ĐIỀU KHIỂN ]
+local FarmTab = Window:CreateTab("Auto Farm", 4483362458)
+local ConfigTab = Window:CreateTab("Cài Đặt", 4483362458)
 
--- [ MENU: AUTO FARM ]
-MainTab:CreateToggle({
-   Name = "Vừa Đi Vừa Farm (Auto Swing)",
+FarmTab:CreateSection("Điều khiển chính")
+
+FarmTab:CreateToggle({
+   Name = "Kích Hoạt Auto Farm (Vung Gậy)",
    CurrentValue = false,
-   Flag = "AutoFarmToggle",
+   Flag = "AutoFarm",
    Callback = function(Value)
-       _G.Atlas_AutoFarm = Value
+       _G_Atlas.Farming = Value
    end,
 })
 
-MainTab:CreateToggle({
-   Name = "Đi Nhặt Kỹ Năng (Thông Minh)",
+FarmTab:CreateToggle({
+   Name = "Kích Hoạt Atlas Smart Collect",
    CurrentValue = false,
-   Flag = "AutoCollectToggle",
+   Flag = "AutoCollect",
    Callback = function(Value)
-       _G.Atlas_AutoCollect = Value
+       _G_Atlas.Collecting = Value
+       if not Value and _G_Atlas.ActiveTween then
+           _G_Atlas.ActiveTween:Cancel()
+           _G_Atlas.CurrentTarget = nil
+       end
    end,
 })
 
-MainTab:CreateSlider({
-   Name = "Tốc Độ Đi Bộ Khi Nhặt",
-   Range = {16, 100},
-   Increment = 1,
-   Suffix = "Speed",
-   CurrentValue = 40,
-   Flag = "WalkSpeedSlider",
-   Callback = function(Value)
-       _G.Atlas_WalkSpeed = Value
-   end,
-})
+FarmTab:CreateSection("Quản lý Tổ Ong")
 
--- [ MENU: TỔ ONG ]
-HiveTab:CreateButton({
+FarmTab:CreateButton({
    Name = "📍 Lưu Vị Trí Tổ Hiện Tại",
    Callback = function()
-       if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-           _G.HiveLocation = player.Character.HumanoidRootPart.CFrame
-           Rayfield:Notify({
-               Title = "Thành Công",
-               Content = "Đã lưu vị trí tổ của bạn!",
-               Duration = 3,
-               Image = 4483362458,
-           })
+       local char = LocalPlayer.Character
+       if char and char:FindFirstChild("HumanoidRootPart") then
+           _G_Atlas.HiveCFrame = char.HumanoidRootPart.CFrame
+           Rayfield:Notify({Title = "Atlas Core", Content = "Đã lưu tọa độ tổ!", Duration = 3})
        end
    end,
 })
 
-HiveTab:CreateButton({
+FarmTab:CreateButton({
    Name = "🏠 Dịch Chuyển Về Tổ (Đổi Mật)",
    Callback = function()
-       if _G.HiveLocation and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-           player.Character.HumanoidRootPart.CFrame = _G.HiveLocation
-       else
-           Rayfield:Notify({
-               Title = "Lỗi",
-               Content = "Bạn chưa lưu vị trí tổ! Hãy đứng ở tổ và bấm Lưu.",
-               Duration = 3,
-               Image = 4483362458,
-           })
+       if _G_Atlas.HiveCFrame then
+           local char = LocalPlayer.Character
+           if char and char:FindFirstChild("HumanoidRootPart") then
+               -- Tắt thu thập tạm thời để tránh kẹt
+               local wasCollecting = _G_Atlas.Collecting
+               _G_Atlas.Collecting = false
+               if _G_Atlas.ActiveTween then _G_Atlas.ActiveTween:Cancel() end
+               task.wait(0.2)
+               
+               char.HumanoidRootPart.CFrame = _G_Atlas.HiveCFrame
+               task.wait(1)
+               _G_Atlas.Collecting = wasCollecting
+           end
        end
    end,
 })
 
--- [ LOGIC 1: AUTO SWING (VUNG GẬY MƯỢT MÀ) ]
+ConfigTab:CreateSlider({
+   Name = "Tốc Độ Lướt (Tween Speed)",
+   Range = {20, 150},
+   Increment = 5,
+   CurrentValue = 60,
+   Flag = "Speed",
+   Callback = function(Value)
+       _G_Atlas.GlideSpeed = Value
+   end,
+})
+
+ConfigTab:CreateSlider({
+   Name = "Bán Kính Quét Token (Met)",
+   Range = {30, 200},
+   Increment = 10,
+   CurrentValue = 80,
+   Flag = "Radius",
+   Callback = function(Value)
+       _G_Atlas.TokenRadius = Value
+   end,
+})
+
+-- [ HỆ THỐNG NOCLIP (TÀNG HÌNH VẬT LÝ) ]
+RunService.Stepped:Connect(function()
+    if _G_Atlas.Collecting then
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+-- [ HỆ THỐNG AUTO FARM (SPAM CLICK) ]
 task.spawn(function()
-    while task.wait(0.1) do
-        if _G.Atlas_AutoFarm then
-            local char = player.Character
-            if char and char:FindFirstChild("Humanoid") then
+    while task.wait(0.05) do
+        if _G_Atlas.Farming then
+            local char = LocalPlayer.Character
+            if char then
                 local tool = char:FindFirstChildOfClass("Tool")
                 if not tool then
-                    local bpTool = player.Backpack:FindFirstChildOfClass("Tool")
+                    local bpTool = LocalPlayer.Backpack:FindFirstChildOfClass("Tool")
                     if bpTool then 
-                        char.Humanoid:EquipTool(bpTool)
+                        bpTool.Parent = char 
                         tool = bpTool
                     end
                 end
@@ -115,63 +154,71 @@ task.spawn(function()
     end
 end)
 
--- [ LOGIC 2: NHẶT KỸ NĂNG THÔNG MINH KIỂU ATLAS ]
-local currentTarget = nil
-local targetStartTime = 0
-local blacklistedTokens = {} -- Danh sách các token bị lỗi/biến mất
+-- [ LÕI ATLAS QUÉT & LƯỚT ]
+local function GetClosestToken(rootPos)
+    local closest = nil
+    local minDist = _G_Atlas.TokenRadius
+    
+    -- Cấu trúc quét diện rộng tối ưu
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and not _G_Atlas.Blacklist[obj] then
+            local name = string.lower(obj.Name)
+            if name == "token" or name == "drop" or name == "coin" or name == "c" then
+                local dist = (obj.Position - rootPos).Magnitude
+                if dist <= minDist then
+                    minDist = dist
+                    closest = obj
+                end
+            end
+        end
+    end
+    return closest
+end
 
 task.spawn(function()
-    while task.wait(0.05) do
-        local char = player.Character
-        if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
-            local humanoid = char.Humanoid
-            local root = char.HumanoidRootPart
-            
-            if _G.Atlas_AutoCollect then
-                humanoid.WalkSpeed = _G.Atlas_WalkSpeed
+    while task.wait() do -- Chạy bằng tốc độ khung hình (Siêu mượt)
+        if _G_Atlas.Collecting then
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local root = char.HumanoidRootPart
                 
-                -- NẾU ĐANG CÓ MỤC TIÊU
-                if currentTarget and currentTarget.Parent and not blacklistedTokens[currentTarget] then
-                    local dist = (currentTarget.Position - root.Position).Magnitude
+                if _G_Atlas.CurrentTarget and _G_Atlas.CurrentTarget.Parent then
+                    local dist = (root.Position - _G_Atlas.CurrentTarget.Position).Magnitude
                     
-                    -- TIMEOUT: Nếu quá 3 giây chưa tới nơi (bị kẹt hoặc token hết hạn biến mất)
-                    if tick() - targetStartTime > 3 then
-                        blacklistedTokens[currentTarget] = true -- Bỏ vào danh sách đen
-                        currentTarget = nil -- Hủy ghim ngay lập tức
-                    elseif dist <= 4 then
-                        currentTarget = nil -- Đã nhặt thành công, hủy ghim
-                    else
-                        humanoid:MoveTo(currentTarget.Position) -- Tiếp tục đi tới
+                    -- Nếu đã ăn được token (khoảng cách cực gần)
+                    if dist <= 3.5 then
+                        if _G_Atlas.ActiveTween then _G_Atlas.ActiveTween:Cancel() end
+                        _G_Atlas.CurrentTarget = nil
+                        _G_Atlas.ActiveTween = nil
                     end
                 else
-                    -- TÌM MỤC TIÊU MỚI (CHỈ TÌM TRONG BÁN KÍNH 60M)
-                    local closestToken = nil
-                    local shortestDist = 60 
+                    -- Tìm mục tiêu mới
+                    local target = GetClosestToken(root.Position)
                     
-                    for _, obj in ipairs(workspace:GetDescendants()) do
-                        if obj:IsA("BasePart") and not blacklistedTokens[obj] then
-                            local name = obj.Name:lower()
-                            if name:match("token") or name:match("drop") or name:match("coin") or name == "c" then
-                                local dist = (obj.Position - root.Position).Magnitude
-                                if dist <= shortestDist then
-                                    shortestDist = dist
-                                    closestToken = obj
-                                end
+                    if target then
+                        _G_Atlas.CurrentTarget = target
+                        local dist = (root.Position - target.Position).Magnitude
+                        local timeToTravel = dist / _G_Atlas.GlideSpeed
+                        
+                        local tweenInfo = TweenInfo.new(timeToTravel, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+                        -- Lướt sát mặt đất để đảm bảo chạm vào token
+                        local goal = {CFrame = target.CFrame} 
+                        
+                        _G_Atlas.ActiveTween = TweenService:Create(root, tweenInfo, goal)
+                        _G_Atlas.ActiveTween:Play()
+                        
+                        -- Timeout Watchdog: Kẹt quá 3 giây thì ném vào danh sách đen
+                        task.spawn(function()
+                            local checkTarget = target
+                            task.wait(timeToTravel + 1.5)
+                            if _G_Atlas.CurrentTarget == checkTarget and checkTarget.Parent then
+                                _G_Atlas.Blacklist[checkTarget] = true
+                                _G_Atlas.CurrentTarget = nil
+                                if _G_Atlas.ActiveTween then _G_Atlas.ActiveTween:Cancel() end
                             end
-                        end
-                    end
-                    
-                    -- NẾU TÌM THẤY -> GHIM LẠI VÀ BẮT ĐẦU ĐẾM THỜI GIAN
-                    if closestToken then
-                        currentTarget = closestToken
-                        targetStartTime = tick() -- Bắt đầu bấm giờ
-                        humanoid:MoveTo(closestToken.Position)
+                        end)
                     end
                 end
-            else
-                -- Khi tắt Auto Nhặt, reset lại mọi thứ
-                currentTarget = nil
-                humanoid.WalkSpeed = 16
             end
         end
     end
