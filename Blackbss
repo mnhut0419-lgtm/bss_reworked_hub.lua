@@ -17,14 +17,14 @@ end)
 
 -- [ XÓA GIAO DIỆN CŨ ]
 local coreGui = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or player:WaitForChild("PlayerGui")
-if coreGui:FindFirstChild("DeltaBSSAutoFarmV7") then
-    coreGui:FindFirstChild("DeltaBSSAutoFarmV7"):Destroy()
+if coreGui:FindFirstChild("DeltaBSSAutoFarmV8") then
+    coreGui:FindFirstChild("DeltaBSSAutoFarmV8"):Destroy()
 end
 
 -- [ TẠO GIAO DIỆN MỚI ]
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = coreGui
-ScreenGui.Name = "DeltaBSSAutoFarmV7"
+ScreenGui.Name = "DeltaBSSAutoFarmV8"
 
 local Frame = Instance.new("Frame")
 Frame.Parent = ScreenGui
@@ -37,11 +37,11 @@ Frame.Draggable = true
 local Title = Instance.new("TextLabel")
 Title.Parent = Frame
 Title.Size = UDim2.new(1, 0, 0, 40)
-Title.Text = "BSS 1:1 V7 (GHIM & TỐC)"
-Title.TextColor3 = Color3.fromRGB(255, 100, 100)
+Title.Text = "BSS 1:1 V8 (FIX ĐỨNG IM)"
+Title.TextColor3 = Color3.fromRGB(100, 255, 100)
 Title.BackgroundTransparency = 1
 Title.Font = Enum.Font.SourceSansBold
-Title.TextSize = 20
+Title.TextSize = 19
 
 local OpenMenuBtn = Instance.new("TextButton")
 OpenMenuBtn.Parent = ScreenGui
@@ -146,12 +146,13 @@ task.spawn(function()
     end
 end)
 
--- [ LOGIC 2: GHIM MỤC TIÊU VÀ TĂNG TỐC ĐỘ NHẶT ]
+-- [ LOGIC 2: GHIM MỤC TIÊU THÔNG MINH + CHỐNG KẸT ]
 local currentTarget = nil
+local targetTimer = 0
 
 task.spawn(function()
     while _G.BSS_AutoFarm_Running do
-        task.wait(0.05) -- Tốc độ phản hồi cực nhanh
+        task.wait(0.05)
         
         local char = player.Character
         if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
@@ -159,25 +160,24 @@ task.spawn(function()
             local humanoid = char.Humanoid
             
             if autoCollect then
-                -- Tăng tốc độ chạy lên 40 (nhanh như chớp)
                 humanoid.WalkSpeed = 40 
                 
-                -- NẾU ĐÃ CÓ MỤC TIÊU GHIM
+                -- KIỂM TRA MỤC TIÊU ĐANG GHIM
                 if currentTarget and currentTarget.Parent then
+                    targetTimer = targetTimer + 0.05
                     local distance = (currentTarget.Position - root.Position).Magnitude
                     
-                    if distance <= 4 then
-                        -- Đã ăn được kỹ năng (đến rất gần), bỏ ghim để đi tìm cái mới
+                    -- Nếu đã nhặt được hoặc quá 3 giây mà chưa tới được (tính là kỹ năng đã biến mất/kẹt) -> Hủy ghim
+                    if distance <= 4 or targetTimer > 3 then
                         currentTarget = nil
-                    elseif distance > 60 then
-                        -- Kỹ năng bay ra khỏi vườn, bỏ ghim
-                        currentTarget = nil
+                        targetTimer = 0
                     else
-                        -- Tiếp tục chạy cắm đầu vào mục tiêu
                         humanoid:MoveTo(currentTarget.Position)
                     end
                 else
-                    -- CHỈ QUÉT BẢN ĐỒ KHI ĐÃ ĂN XONG (Chống giật lag)
+                    -- TÌM MỤC TIÊU MỚI
+                    currentTarget = nil
+                    targetTimer = 0
                     local shortestDistance = 60
                     local tempTarget = nil
                     
@@ -194,15 +194,15 @@ task.spawn(function()
                         end
                     end
                     
-                    -- Tìm thấy kỹ năng -> Ghim nó lại ngay
                     if tempTarget then
                         currentTarget = tempTarget
+                        targetTimer = 0 -- Reset bộ đếm thời gian khi bắt đầu ghim mới
                         humanoid:MoveTo(currentTarget.Position)
                     end
                 end
             else
-                -- Khi tắt tính năng nhặt, trả lại tốc độ đi bộ bình thường (16) và xóa ghim
                 currentTarget = nil
+                targetTimer = 0
                 humanoid.WalkSpeed = 16
             end
         end
