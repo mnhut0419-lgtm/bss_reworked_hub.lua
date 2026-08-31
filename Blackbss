@@ -1,20 +1,14 @@
--- [ BỘ LỌC NGẮT SCRIPT CŨ ]
-if _G.BSS_AutoFarm_Running then
-    _G.BSS_AutoFarm_Running = false
+-- [ BSS ATLAS PRO - MULTI TAB UI ]
+if _G.BSS_Atlas_Running then
+    _G.BSS_Atlas_Running = false
     task.wait(0.5)
 end
-_G.BSS_AutoFarm_Running = true
+_G.BSS_Atlas_Running = true
 
 -- [ SERVICES ]
 local player = game.Players.LocalPlayer
 local virtualUser = game:GetService("VirtualUser")
-local runService = game:GetService("RunService")
 local tweenService = game:GetService("TweenService")
-local collectionService = game:GetService("CollectionService")
-local httpService = game:GetService("HttpService")
-local teleportService = game:GetService("TeleportService")
-local replicatedStorage = game:GetService("ReplicatedStorage")
-local userInputService = game:GetService("UserInputService")
 
 -- [ CHỐNG AFK ]
 player.Idled:Connect(function()
@@ -23,290 +17,312 @@ player.Idled:Connect(function()
     virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- [ XÓA GIAO DIỆN CŨ ]
-local coreGui = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or player:WaitForChild("PlayerGui")
-if coreGui:FindFirstChild("DeltaBSSProV8") then
-    coreGui:FindFirstChild("DeltaBSSProV8"):Destroy()
+-- [ XÓA UI CŨ ]
+local coreGui = game:GetService("CoreGui")
+if coreGui:FindFirstChild("AtlasBSS") then
+    coreGui:FindFirstChild("AtlasBSS"):Destroy()
 end
 
--- [ TẠO GIAO DIỆN MỚI ]
+-- [ TẠO UI CHÍNH ]
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = coreGui
-ScreenGui.Name = "DeltaBSSProV8"
+ScreenGui.Name = "AtlasBSS"
 
--- Main Frame
-local Frame = Instance.new("Frame")
-Frame.Parent = ScreenGui
-Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-Frame.Position = UDim2.new(0.5, -150, 0.15, 0)
-Frame.Size = UDim2.new(0, 300, 0, 480)
-Frame.Active = true
-Frame.Draggable = true
-Frame.BorderSizePixel = 0
+local MainFrame = Instance.new("Frame")
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+MainFrame.Position = UDim2.new(0.5, -175, 0.3, 0)
+MainFrame.Size = UDim2.new(0, 350, 0, 300)
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.BorderSizePixel = 0
 
--- Title
+-- [ HEADER ]
+local Header = Instance.new("Frame")
+Header.Parent = MainFrame
+Header.Size = UDim2.new(1, 0, 0, 40)
+Header.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+
 local Title = Instance.new("TextLabel")
-Title.Parent = Frame
-Title.Size = UDim2.new(1, 0, 0, 50)
-Title.Text = "🐝 BSS PRO HUB V8"
-Title.TextColor3 = Color3.fromRGB(255, 200, 0)
+Title.Parent = Header
+Title.Size = UDim2.new(1, 0, 1, 0)
+Title.Text = "🐝 ATLAS BSS"
+Title.TextColor3 = Color3.fromRGB(255, 180, 0)
 Title.BackgroundTransparency = 1
 Title.Font = Enum.Font.SourceSansBold
-Title.TextSize = 24
+Title.TextSize = 18
 
--- Status Bar
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Parent = Frame
-StatusLabel.Size = UDim2.new(1, 0, 0, 25)
-StatusLabel.Position = UDim2.new(0, 0, 0, 50)
-StatusLabel.Text = "💤 Đang Chờ"
-StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Font = Enum.Font.SourceSans
-StatusLabel.TextSize = 14
+-- [ TAB BAR ]
+local TabBar = Instance.new("Frame")
+TabBar.Parent = MainFrame
+TabBar.Size = UDim2.new(1, 0, 0, 35)
+TabBar.Position = UDim2.new(0, 0, 0, 40)
+TabBar.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
 
--- Mini Map Button
-local OpenMenuBtn = Instance.new("TextButton")
-OpenMenuBtn.Parent = ScreenGui
-OpenMenuBtn.Size = UDim2.new(0, 120, 0, 40)
-OpenMenuBtn.Position = UDim2.new(0, 10, 0.5, -20)
-OpenMenuBtn.Text = "📋 Mở Menu"
-OpenMenuBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
-OpenMenuBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-OpenMenuBtn.Font = Enum.Font.SourceSansBold
-OpenMenuBtn.TextSize = 16
-OpenMenuBtn.Visible = false
-OpenMenuBtn.BorderSizePixel = 0
-
--- Button Creator
-local function createButton(yPos, text, color)
-    local btn = Instance.new("TextButton")
-    btn.Parent = Frame
-    btn.Size = UDim2.new(0.9, 0, 0, 38)
-    btn.Position = UDim2.new(0.05, 0, 0, yPos)
-    btn.Text = text
-    btn.BackgroundColor3 = color or Color3.fromRGB(55, 55, 60)
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.SourceSansBold
-    btn.TextSize = 14
-    btn.BorderSizePixel = 0
-    return btn
+local function createTab(name, xPos)
+    local tab = Instance.new("TextButton")
+    tab.Parent = TabBar
+    tab.Size = UDim2.new(0.25, 0, 1, 0)
+    tab.Position = UDim2.new(xPos, 0, 0, 0)
+    tab.Text = name
+    tab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    tab.TextColor3 = Color3.fromRGB(200, 200, 200)
+    tab.Font = Enum.Font.SourceSansBold
+    tab.TextSize = 13
+    tab.BorderSizePixel = 0
+    return tab
 end
 
--- Toggle Creator
-local function createToggle(yPos, text, defaultState)
+local FarmTab = createTab("🌾 Farm", 0)
+local CombatTab = createTab("⚔️ Combat", 0.25)
+local CollectTab = createTab("💎 Collect", 0.5)
+local TeleTab = createTab("🚀 Teleport", 0.75)
+
+-- [ CONTENT AREA ]
+local ContentArea = Instance.new("Frame")
+ContentArea.Parent = MainFrame
+ContentArea.Size = UDim2.new(1, 0, 1, -75)
+ContentArea.Position = UDim2.new(0, 0, 0, 75)
+ContentArea.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+ContentArea.BorderSizePixel = 0
+
+-- [ TAB PAGES ]
+local FarmPage = Instance.new("Frame")
+FarmPage.Parent = ContentArea
+FarmPage.Size = UDim2.new(1, 0, 1, 0)
+FarmPage.BackgroundTransparency = 1
+
+local CombatPage = Instance.new("Frame")
+CombatPage.Parent = ContentArea
+CombatPage.Size = UDim2.new(1, 0, 1, 0)
+CombatPage.BackgroundTransparency = 1
+CombatPage.Visible = false
+
+local CollectPage = Instance.new("Frame")
+CollectPage.Parent = ContentArea
+CollectPage.Size = UDim2.new(1, 0, 1, 0)
+CollectPage.BackgroundTransparency = 1
+CollectPage.Visible = false
+
+local TelePage = Instance.new("Frame")
+TelePage.Parent = ContentArea
+TelePage.Size = UDim2.new(1, 0, 1, 0)
+TelePage.BackgroundTransparency = 1
+TelePage.Visible = false
+
+-- [ TAB SWITCHING ]
+local function switchTab(tab, page)
+    FarmTab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    CombatTab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    CollectTab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    TeleTab.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    
+    FarmPage.Visible = false
+    CombatPage.Visible = false
+    CollectPage.Visible = false
+    TelePage.Visible = false
+    
+    tab.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+    page.Visible = true
+end
+
+FarmTab.MouseButton1Click:Connect(function()
+    switchTab(FarmTab, FarmPage)
+end)
+
+CombatTab.MouseButton1Click:Connect(function()
+    switchTab(CombatTab, CombatPage)
+end)
+
+CollectTab.MouseButton1Click:Connect(function()
+    switchTab(CollectTab, CollectPage)
+end)
+
+TeleTab.MouseButton1Click:Connect(function()
+    switchTab(TeleTab, TelePage)
+end)
+
+-- [ CREATE TOGGLE BUTTON ]
+local function createToggle(parent, yPos, text)
     local toggleFrame = Instance.new("Frame")
-    toggleFrame.Parent = Frame
-    toggleFrame.Size = UDim2.new(0.9, 0, 0, 38)
-    toggleFrame.Position = UDim2.new(0.05, 0, 0, yPos)
-    toggleFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+    toggleFrame.Parent = parent
+    toggleFrame.Size = UDim2.new(0.95, 0, 0, 35)
+    toggleFrame.Position = UDim2.new(0.025, 0, 0, yPos)
+    toggleFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
     toggleFrame.BorderSizePixel = 0
     
     local label = Instance.new("TextLabel")
     label.Parent = toggleFrame
-    label.Size = UDim2.new(0.65, 0, 1, 0)
+    label.Size = UDim2.new(0.7, 0, 1, 0)
     label.Text = text
     label.TextColor3 = Color3.fromRGB(255, 255, 255)
     label.BackgroundTransparency = 1
     label.Font = Enum.Font.SourceSans
-    label.TextSize = 13
-    label.TextWrapped = true
+    label.TextSize = 12
     
-    local toggleBtn = Instance.new("TextButton")
-    toggleBtn.Parent = toggleFrame
-    toggleBtn.Size = UDim2.new(0.35, 0, 0.8, 0)
-    toggleBtn.Position = UDim2.new(0.65, 0, 0.1, 0)
-    toggleBtn.Text = defaultState and "✅ ON" or "❌ OFF"
-    toggleBtn.BackgroundColor3 = defaultState and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(160, 40, 40)
-    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    toggleBtn.Font = Enum.Font.SourceSansBold
-    toggleBtn.TextSize = 13
-    toggleBtn.BorderSizePixel = 0
+    local btn = Instance.new("TextButton")
+    btn.Parent = toggleFrame
+    btn.Size = UDim2.new(0.3, 0, 0.8, 0)
+    btn.Position = UDim2.new(0.7, 0, 0.1, 0)
+    btn.Text = "OFF"
+    btn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 12
+    btn.BorderSizePixel = 0
     
-    return toggleBtn
+    local state = false
+    
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.Text = state and "ON" or "OFF"
+        btn.BackgroundColor3 = state and Color3.fromRGB(40, 150, 40) or Color3.fromRGB(150, 40, 40)
+    end)
+    
+    return btn
 end
 
--- [ FEATURES BUTTONS ]
-local FarmBtn = createToggle(80, "🌾 Auto Farm", false)
-local CollectBtn = createToggle(122, "🏃 Auto Collect", false)
-local ESPSBtn = createToggle(164, "👁️ ESP Tokens", false)
-local QuestBtn = createToggle(206, "📜 Auto Quest", false)
-local ShopBtn = createToggle(248, "🛒 Auto Shop", false)
-local RebirthBtn = createToggle(290, "🔄 Auto Rebirth", false)
-local SaveHiveBtn = createButton(335, "📍 Lưu Vị Trí Tổ")
-local HiveBtn = createButton(377, "🏠 Về Tổ")
-local NotifyBtn = createButton(419, "🔔 Test Notification")
-local MinimizeBtn = createButton(461, "📉 Thu Nhỏ", Color3.fromRGB(180, 80, 40))
+-- [ CREATE ACTION BUTTON ]
+local function createAction(parent, yPos, text)
+    local btn = Instance.new("TextButton")
+    btn.Parent = parent
+    btn.Size = UDim2.new(0.95, 0, 0, 35)
+    btn.Position = UDim2.new(0.025, 0, 0, yPos)
+    btn.Text = text
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 12
+    btn.BorderSizePixel = 0
+    return btn
+end
 
--- [ VARIABLES ]
-local autoFarm = false
-local autoCollect = false
-local espEnabled = false
-local autoQuest = false
-local autoShop = false
-local autoRebirth = false
-local myHiveCFrame = nil
-local collectRadius = 60
-local espObjects = {}
+-- [ FARM TAB BUTTONS ]
+local farmPollenBtn = createToggle(FarmPage, 10, "🌼 Farm Phấn Hoa")
+local farmSproutBtn = createToggle(FarmPage, 50, "🌱 Farm Sprout")
+local autoAbilityBtn = createToggle(FarmPage, 90, "⚡ Auto Ability")
 
--- [ FEATURE 1: AUTO FARM ]
-FarmBtn.MouseButton1Click:Connect(function()
-    autoFarm = not autoFarm
-    FarmBtn.Text = autoFarm and "✅ ON" or "❌ OFF"
-    FarmBtn.BackgroundColor3 = autoFarm and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(160, 40, 40)
-    StatusLabel.Text = autoFarm and "⚡ Đang Farm..." or "💤 Đang Chờ"
+-- [ COMBAT TAB BUTTONS ]
+local farmBossBtn = createToggle(CombatPage, 10, "👑 Farm Boss")
+local farmMobsBtn = createToggle(CombatPage, 50, "⚔️ Farm Mobs")
+local autoAttackBtn = createToggle(CombatPage, 90, "💥 Auto Attack")
+
+-- [ COLLECT TAB BUTTONS ]
+local collectTokensBtn = createToggle(CollectPage, 10, "🎯 Thu Thập Token")
+local collectHoneyBtn = createToggle(CollectPage, 50, "🍯 Thu Thập Mật")
+local autoLootBtn = createToggle(CollectPage, 90, "📦 Auto Loot")
+
+-- [ TELEPORT TAB BUTTONS ]
+local savePosBtn = createAction(TelePage, 10, "📍 Lưu Vị Trí")
+local teleBackBtn = createAction(TelePage, 50, "🚀 Teleport Về")
+local teleFieldsBtn = createAction(TelePage, 90, "🗺️ Teleport Fields")
+
+-- [ THU NHỎ MENU ]
+local MinimizeBtn = Instance.new("TextButton")
+MinimizeBtn.Parent = ScreenGui
+MinimizeBtn.Size = UDim2.new(0, 80, 0, 30)
+MinimizeBtn.Position = UDim2.new(0, 10, 0.5, -15)
+MinimizeBtn.Text = "📋 Menu"
+MinimizeBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
+MinimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeBtn.Font = Enum.Font.SourceSansBold
+MinimizeBtn.TextSize = 12
+MinimizeBtn.Visible = false
+
+local minimizeAction = createAction(MainFrame, 265, "📉 Thu Nhỏ")
+minimizeAction.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    MinimizeBtn.Visible = true
+end)
+
+MinimizeBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = true
+    MinimizeBtn.Visible = false
+end)
+
+-- [ FARM LOGIC ]
+local farmPollen = false
+local farmSprout = false
+local autoAbility = false
+local farmBoss = false
+local farmMobs = false
+local autoAttack = false
+local collectTokens = false
+local collectHoney = false
+local autoLoot = false
+local savedPosition = nil
+
+-- Farm Phấn Hoa
+farmPollenBtn.MouseButton1Click:Connect(function()
+    farmPollen = not farmPollen
 end)
 
 task.spawn(function()
-    while _G.BSS_AutoFarm_Running do
-        task.wait(0.05)
-        if autoFarm then
+    while _G.BSS_Atlas_Running do
+        task.wait(0.1)
+        if farmPollen then
             local char = player.Character
-            if char and char:FindFirstChild("Humanoid") then
-                local tool = char:FindFirstChildOfClass("Tool")
-                if not tool then
-                    local bpTool = player.Backpack:FindFirstChildOfClass("Tool")
-                    if bpTool then
-                        char.Humanoid:EquipTool(bpTool)
-                        tool = bpTool
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local root = char.HumanoidRootPart
+                
+                -- Tìm flowers
+                local flowers = {}
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    if obj:IsA("BasePart") and obj.Name:lower():match("flower") then
+                        table.insert(flowers, obj)
                     end
                 end
-                if tool then
-                    tool:Activate()
+                
+                if #flowers > 0 then
+                    local target = flowers[math.random(1, #flowers)]
+                    if char:FindFirstChild("Humanoid") then
+                        char.Humanoid:MoveTo(target.Position)
+                        
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        if not tool then
+                            local bpTool = player.Backpack:FindFirstChildOfClass("Tool")
+                            if bpTool then
+                                char.Humanoid:EquipTool(bpTool)
+                            end
+                        elseif tool then
+                            tool:Activate()
+                        end
+                    end
                 end
             end
         end
     end
 end)
 
--- [ FEATURE 2: AUTO COLLECT ]
-CollectBtn.MouseButton1Click:Connect(function()
-    autoCollect = not autoCollect
-    CollectBtn.Text = autoCollect and "✅ ON" or "❌ OFF"
-    CollectBtn.BackgroundColor3 = autoCollect and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(160, 40, 40)
-    if autoCollect then
-        StatusLabel.Text = "🔍 Đang Tìm Token..."
-    end
+-- Thu Thập Token
+collectTokensBtn.MouseButton1Click:Connect(function()
+    collectTokens = not collectTokens
 end)
 
 task.spawn(function()
-    while _G.BSS_AutoFarm_Running do
-        task.wait(0.1)
-        if autoCollect then
+    while _G.BSS_Atlas_Running do
+        task.wait(0.05)
+        if collectTokens then
             local char = player.Character
-            if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
+            if char and char:FindFirstChild("HumanoidRootPart") then
                 local root = char.HumanoidRootPart
-                local humanoid = char.Humanoid
-                
                 local nearestToken = nil
-                local shortestDistance = collectRadius
+                local shortestDist = 100
                 
                 for _, obj in ipairs(workspace:GetDescendants()) do
-                    if obj:IsA("BasePart") and obj:FindFirstChild("Position") then
-                        local name = obj.Name:lower()
-                        local parentName = obj.Parent and obj.Parent.Name:lower() or ""
-                        
-                        local isToken = name:match("token") or 
-                                      name:match("drop") or 
-                                      name:match("coin") or 
-                                      name:match("pollen") or
-                                      name:match("honey") or
-                                      parentName:match("collectible") or
-                                      collectionService:HasTag(obj, "Collectible")
-                        
-                        if isToken then
-                            local dist = (obj.Position - root.Position).Magnitude
-                            if dist <= shortestDistance then
-                                shortestDistance = dist
-                                nearestToken = obj
-                            end
+                    if obj:IsA("BasePart") and obj.Name:lower():match("token") then
+                        local dist = (obj.Position - root.Position).Magnitude
+                        if dist < shortestDist then
+                            shortestDist = dist
+                            nearestToken = obj
                         end
                     end
                 end
                 
-                if nearestToken then
-                    humanoid:MoveTo(nearestToken.Position)
-                    StatusLabel.Text = "🎯 Đang Nhặt Token"
-                else
-                    StatusLabel.Text = "🔍 Tìm Token..."
-                end
-            end
-        end
-    end
-end)
-
--- [ FEATURE 3: ESP SYSTEM ]
-ESPSBtn.MouseButton1Click:Connect(function()
-    espEnabled = not espEnabled
-    ESPSBtn.Text = espEnabled and "✅ ON" or "❌ OFF"
-    ESPSBtn.BackgroundColor3 = espEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(160, 40, 40)
-    
-    if espEnabled then
-        StatusLabel.Text = "👁️ ESP Đang Bật"
-        createESP()
-    else
-        StatusLabel.Text = "ESP Đã Tắt"
-        clearESP()
-    end
-end)
-
-function createESP()
-    clearESP()
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name:lower():match("token") then
-            local highlight = Instance.new("Highlight")
-            highlight.Parent = obj
-            highlight.FillColor = Color3.fromRGB(255, 255, 0)
-            highlight.OutlineColor = Color3.fromRGB(255, 200, 0)
-            highlight.FillTransparency = 0.5
-            highlight.OutlineTransparency = 0
-            table.insert(espObjects, highlight)
-        end
-    end
-end
-
-function clearESP()
-    for _, highlight in ipairs(espObjects) do
-        if highlight and highlight.Parent then
-            highlight:Destroy()
-        end
-    end
-    espObjects = {}
-end
-
--- Cập nhật ESP mỗi 5 giây
-task.spawn(function()
-    while _G.BSS_AutoFarm_Running do
-        task.wait(5)
-        if espEnabled then
-            createESP()
-        end
-    end
-end)
-
--- [ FEATURE 4: AUTO QUEST ]
-QuestBtn.MouseButton1Click:Connect(function()
-    autoQuest = not autoQuest
-    QuestBtn.Text = autoQuest and "✅ ON" or "❌ OFF"
-    QuestBtn.BackgroundColor3 = autoQuest and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(160, 40, 40)
-    if autoQuest then
-        StatusLabel.Text = "📜 Auto Quest Bật"
-    end
-end)
-
-task.spawn(function()
-    while _G.BSS_AutoFarm_Running do
-        task.wait(3)
-        if autoQuest then
-            -- Tìm và nhận quest tự động
-            local questFrames = player.PlayerGui:GetDescendants()
-            for _, obj in ipairs(questFrames) do
-                if obj:IsA("TextButton") then
-                    local text = obj.Text:lower()
-                    if text:match("accept") or text:match("claim") or text:match("complete") then
-                        obj:Click()
-                        StatusLabel.Text = "📜 Đã Nhận Quest!"
-                        task.wait(0.5)
+                if nearestToken and char:FindFirstChild("Humanoid") then
+                    char.Humanoid:MoveTo(nearestToken.Position)
+                    if shortestDist < 5 then
+                        root.CFrame = CFrame.new(nearestToken.Position)
                     end
                 end
             end
@@ -314,29 +330,35 @@ task.spawn(function()
     end
 end)
 
--- [ FEATURE 5: AUTO SHOP ]
-ShopBtn.MouseButton1Click:Connect(function()
-    autoShop = not autoShop
-    ShopBtn.Text = autoShop and "✅ ON" or "❌ OFF"
-    ShopBtn.BackgroundColor3 = autoShop and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(160, 40, 40)
-    if autoShop then
-        StatusLabel.Text = "🛒 Auto Shop Bật"
-    end
+-- Farm Boss
+farmBossBtn.MouseButton1Click:Connect(function()
+    farmBoss = not farmBoss
 end)
 
 task.spawn(function()
-    while _G.BSS_AutoFarm_Running do
-        task.wait(5)
-        if autoShop then
-            -- Tự động mua items
-            local shopItems = player.PlayerGui:GetDescendants()
-            for _, obj in ipairs(shopItems) do
-                if obj:IsA("TextButton") then
-                    local text = obj.Text:lower()
-                    if text:match("buy") or text:match("purchase") then
-                        obj:Click()
-                        StatusLabel.Text = "🛒 Đã Mua Item!"
-                        task.wait(0.5)
+    while _G.BSS_Atlas_Running do
+        task.wait(0.5)
+        if farmBoss then
+            local char = player.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local root = char.HumanoidRootPart
+                
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    if obj:IsA("Model") and obj.Name:lower():match("boss") then
+                        local bossRoot = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Torso")
+                        if bossRoot then
+                            local dist = (bossRoot.Position - root.Position).Magnitude
+                            if dist < 100 then
+                                if char:FindFirstChild("Humanoid") then
+                                    char.Humanoid:MoveTo(bossRoot.Position)
+                                    
+                                    local tool = char:FindFirstChildOfClass("Tool")
+                                    if tool and dist < 20 then
+                                        tool:Activate()
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
             end
@@ -344,114 +366,57 @@ task.spawn(function()
     end
 end)
 
--- [ FEATURE 6: AUTO REBIRTH (BONUS) ]
-RebirthBtn.MouseButton1Click:Connect(function()
-    autoRebirth = not autoRebirth
-    RebirthBtn.Text = autoRebirth and "✅ ON" or "❌ OFF"
-    RebirthBtn.BackgroundColor3 = autoRebirth and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(160, 40, 40)
-    if autoRebirth then
-        StatusLabel.Text = "🔄 Auto Rebirth Bật"
-    end
+-- Auto Ability
+autoAbilityBtn.MouseButton1Click:Connect(function()
+    autoAbility = not autoAbility
 end)
 
 task.spawn(function()
-    while _G.BSS_AutoFarm_Running do
-        task.wait(10)
-        if autoRebirth then
-            -- Kiểm tra nếu có thể rebirth
-            local rebirthButtons = player.PlayerGui:GetDescendants()
-            for _, obj in ipairs(rebirthButtons) do
-                if obj:IsA("TextButton") and obj.Text:lower():match("rebirth") then
-                    obj:Click()
-                    StatusLabel.Text = "🔄 Đang Rebirth..."
-                    task.wait(1)
-                end
-            end
-        end
-    end
-end)
-
--- [ NOTIFICATION SYSTEM ]
-function sendNotification(title, message, duration)
-    local notifFrame = Instance.new("Frame")
-    notifFrame.Parent = ScreenGui
-    notifFrame.Size = UDim2.new(0, 300, 0, 80)
-    notifFrame.Position = UDim2.new(1, -310, 0, 10)
-    notifFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-    notifFrame.BorderSizePixel = 0
-    
-    local notifTitle = Instance.new("TextLabel")
-    notifTitle.Parent = notifFrame
-    notifTitle.Size = UDim2.new(1, 0, 0, 30)
-    notifTitle.Text = title
-    notifTitle.TextColor3 = Color3.fromRGB(255, 200, 0)
-    notifTitle.BackgroundTransparency = 1
-    notifTitle.Font = Enum.Font.SourceSansBold
-    notifTitle.TextSize = 16
-    
-    local notifMsg = Instance.new("TextLabel")
-    notifMsg.Parent = notifFrame
-    notifMsg.Size = UDim2.new(1, 0, 0, 40)
-    notifMsg.Position = UDim2.new(0, 0, 0, 30)
-    notifMsg.Text = message
-    notifMsg.TextColor3 = Color3.fromRGB(255, 255, 255)
-    notifMsg.BackgroundTransparency = 1
-    notifMsg.Font = Enum.Font.SourceSans
-    notifMsg.TextSize = 14
-    
-    -- Animation
-    notifFrame.Position = UDim2.new(1, 10, 0, 10)
-    local tween = tweenService:Create(notifFrame, TweenInfo.new(0.5), {Position = UDim2.new(1, -310, 0, 10)})
-    tween:Play()
-    
-    task.wait(duration or 3)
-    
-    local tweenOut = tweenService:Create(notifFrame, TweenInfo.new(0.5), {Position = UDim2.new(1, 10, 0, 10)})
-    tweenOut:Play()
-    task.wait(0.5)
-    notifFrame:Destroy()
-end
-
-NotifyBtn.MouseButton1Click:Connect(function()
-    sendNotification("🐝 BSS PRO HUB", "Script hoạt động tốt!", 2)
-end)
-
--- [ SAVE/LOAD HIVE ]
-SaveHiveBtn.MouseButton1Click:Connect(function()
-    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        myHiveCFrame = player.Character.HumanoidRootPart.CFrame
-        SaveHiveBtn.Text = "✅ Đã Lưu!"
-        sendNotification("📍 Lưu Vị Trí", "Đã lưu vị trí tổ thành công!", 2)
+    while _G.BSS_Atlas_Running do
         task.wait(1)
-        SaveHiveBtn.Text = "📍 Lưu Vị Trí Tổ"
-    end
-end)
-
-HiveBtn.MouseButton1Click:Connect(function()
-    if not myHiveCFrame then 
-        sendNotification("⚠️ Lỗi", "Chưa lưu vị trí tổ!", 2)
-        return 
-    end
-    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        local humanoid = player.Character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid:MoveTo(myHiveCFrame.Position)
-            sendNotification("🏠 Về Tổ", "Đang di chuyển về tổ...", 2)
+        if autoAbility then
+            local char = player.Character
+            if char and char:FindFirstChildOfClass("Tool") then
+                local tool = char:FindFirstChildOfClass("Tool")
+                tool:Activate()
+            end
         end
     end
 end)
 
--- [ MINIMIZE ]
-MinimizeBtn.MouseButton1Click:Connect(function()
-    Frame.Visible = false
-    OpenMenuBtn.Visible = true
+-- Save Position
+savePosBtn.MouseButton1Click:Connect(function()
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        savedPosition = player.Character.HumanoidRootPart.CFrame
+        savePosBtn.Text = "✅ Đã Lưu!"
+        task.wait(1)
+        savePosBtn.Text = "📍 Lưu Vị Trí"
+    end
 end)
 
-OpenMenuBtn.MouseButton1Click:Connect(function()
-    Frame.Visible = true
-    OpenMenuBtn.Visible = false
+-- Teleport Back
+teleBackBtn.MouseButton1Click:Connect(function()
+    if savedPosition and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        player.Character.HumanoidRootPart.CFrame = savedPosition
+    end
 end)
 
--- [ THÔNG BÁO KHỞI ĐỘNG ]
-sendNotification("🐝 BSS PRO HUB V8", "Script đã sẵn sàng! Chúc bạn chơi vui vẻ!", 3)
-StatusLabel.Text = "✅ Script Đã Sẵn Sàng!"
+-- Teleport Fields
+teleFieldsBtn.MouseButton1Click:Connect(function()
+    -- Tìm và teleport tới field ngẫu nhiên
+    local fields = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower():match("field") then
+            table.insert(fields, obj)
+        end
+    end
+    
+    if #fields > 0 and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local randomField = fields[math.random(1, #fields)]
+        player.Character.HumanoidRootPart.CFrame = CFrame.new(randomField.Position + Vector3.new(0, 10, 0))
+    end
+end)
+
+-- [ THÔNG BÁO ]
+print("✅ Atlas BSS Script đã sẵn sàng!")
+print("📋 Menu chia tabs: Farm | Combat | Collect | Teleport")
