@@ -1,225 +1,451 @@
--- =====================================================================
--- ATLAS CORE ARCHITECTURE - BSS 1:1 ADAPTATION
--- Framework: Rayfield | Logic: Real-time Caching & Tween Gliding
--- =====================================================================
-
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-local Window = Rayfield:CreateWindow({
-   Name = "🐝 Atlas Core | BSS 1:1",
-   LoadingTitle = "Khởi chạy lõi Atlas...",
-   LoadingSubtitle = "Đã điều chỉnh cho Fanmade Server",
-   ConfigurationSaving = { Enabled = false },
-   KeySystem = false
-})
-
-local _G_Atlas = {
-    Farming = false,
-    Collecting = false,
-    GlideSpeed = 60,
-    TokenRadius = 80,
-    HiveCFrame = nil,
-    Blacklist = {},
-    CurrentTarget = nil
-}
+--==============================================================
+-- AUTHORIZED GARDEN COLLECTOR
+-- Chỉ đi bộ và chạm vật phẩm theo cơ chế bình thường của game
+--==============================================================
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local VirtualUser = game:GetService("VirtualUser")
-local LocalPlayer = Players.LocalPlayer
+local CollectionService = game:GetService("CollectionService")
 
--- [ ANTI-AFK HỆ THỐNG ]
-LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
 
--- [ GIAO DIỆN ĐIỀU KHIỂN ]
-local FarmTab = Window:CreateTab("Auto Farm", 4483362458)
-local ConfigTab = Window:CreateTab("Cài Đặt", 4483362458)
+local Config = {
+    -- Phạm vi khu vườn tính từ vị trí nhấn Bắt đầu
+    FieldRadius = 85,
 
-FarmTab:CreateSection("Điều khiển chính")
+    -- Chỉ nhặt vật phẩm cách nhân vật không quá khoảng này
+    ScanRadius = 100,
 
-FarmTab:CreateToggle({
-   Name = "Kích Hoạt Auto Farm (Vung Gậy)",
-   CurrentValue = false,
-   Flag = "AutoFarm",
-   Callback = function(Value)
-       _G_Atlas.Farming = Value
-   end,
-})
+    ReachDistance = 4,
+    MoveTimeout = 8,
+    PickupWait = 0.5,
+    FailedTargetCooldown = 8,
+    PatrolMoveTime = 4,
 
-FarmTab:CreateToggle({
-   Name = "Kích Hoạt Atlas Smart Collect",
-   CurrentValue = false,
-   Flag = "AutoCollect",
-   Callback = function(Value)
-       _G_Atlas.Collecting = Value
-       if not Value and _G_Atlas.ActiveTween then
-           _G_Atlas.ActiveTween:Cancel()
-           _G_Atlas.CurrentTarget = nil
-       end
-   end,
-})
+    -- Nên để admin gắn tag "Collectible" cho vật phẩm
+    CollectibleTag = "Collectible",
 
-FarmTab:CreateSection("Quản lý Tổ Ong")
+    AttributeNames = {
+        "Collectible",
+        "Pickup",
+        "Token",
+        "Totem",
+    },
 
-FarmTab:CreateButton({
-   Name = "📍 Lưu Vị Trí Tổ Hiện Tại",
-   Callback = function()
-       local char = LocalPlayer.Character
-       if char and char:FindFirstChild("HumanoidRootPart") then
-           _G_Atlas.HiveCFrame = char.HumanoidRootPart.CFrame
-           Rayfield:Notify({Title = "Atlas Core", Content = "Đã lưu tọa độ tổ!", Duration = 3})
-       end
-   end,
-})
+    -- Có thể thêm tên thật của vật phẩm tại đây
+    NameKeywords = {
+        "token",
+        "totem",
+        "drop",
+        "coin",
+        "item",
+        "pickup",
+        "collectible",
+    },
+}
 
-FarmTab:CreateButton({
-   Name = "🏠 Dịch Chuyển Về Tổ (Đổi Mật)",
-   Callback = function()
-       if _G_Atlas.HiveCFrame then
-           local char = LocalPlayer.Character
-           if char and char:FindFirstChild("HumanoidRootPart") then
-               -- Tắt thu thập tạm thời để tránh kẹt
-               local wasCollecting = _G_Atlas.Collecting
-               _G_Atlas.Collecting = false
-               if _G_Atlas.ActiveTween then _G_Atlas.ActiveTween:Cancel() end
-               task.wait(0.2)
-               
-               char.HumanoidRootPart.CFrame = _G_Atlas.HiveCFrame
-               task.wait(1)
-               _G_Atlas.Collecting = wasCollecting
-           end
-       end
-   end,
-})
+local Enabled = false
+local FieldCenter = nil
+local CurrentTarget = nil
 
-ConfigTab:CreateSlider({
-   Name = "Tốc Độ Lướt (Tween Speed)",
-   Range = {20, 150},
-   Increment = 5,
-   CurrentValue = 60,
-   Flag = "Speed",
-   Callback = function(Value)
-       _G_Atlas.GlideSpeed = Value
-   end,
-})
+-- Cache vật phẩm, tránh quét toàn bộ Workspace liên tục
+local Tracked = setmetatable({}, { __mode = "k" })
+local BlockedUntil = setmetatable({}, { __mode = "k" })
 
-ConfigTab:CreateSlider({
-   Name = "Bán Kính Quét Token (Met)",
-   Range = {30, 200},
-   Increment = 10,
-   CurrentValue = 80,
-   Flag = "Radius",
-   Callback = function(Value)
-       _G_Atlas.TokenRadius = Value
-   end,
-})
+local function containsKeyword(name)
+    name = string.lower(name)
 
--- [ HỆ THỐNG NOCLIP (TÀNG HÌNH VẬT LÝ) ]
-RunService.Stepped:Connect(function()
-    if _G_Atlas.Collecting then
-        local char = LocalPlayer.Character
-        if char then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part.CanCollide then
-                    part.CanCollide = false
-                end
-            end
+    for _, keyword in ipairs(Config.NameKeywords) do
+        if string.find(name, keyword, 1, true) then
+            return true
         end
+    end
+
+    return false
+end
+
+local function hasCollectibleMarker(instance)
+    if CollectionService:HasTag(instance, Config.CollectibleTag) then
+        return true
+    end
+
+    for _, attributeName in ipairs(Config.AttributeNames) do
+        if instance:GetAttribute(attributeName) == true then
+            return true
+        end
+    end
+
+    return containsKeyword(instance.Name)
+end
+
+local function resolveCollectible(part)
+    if hasCollectibleMarker(part) then
+        return part
+    end
+
+    local ancestor = part.Parent
+
+    -- Kiểm tra tối đa ba cấp cha: Model vật phẩm hoặc thư mục Tokens
+    for _ = 1, 3 do
+        if not ancestor or ancestor == workspace then
+            break
+        end
+
+        if hasCollectibleMarker(ancestor) then
+            if ancestor:IsA("Model") then
+                return ancestor
+            end
+
+            -- Nếu là Folder như Tokens/Drops thì theo dõi Part con
+            return part
+        end
+
+        ancestor = ancestor.Parent
+    end
+
+    return nil
+end
+
+local function registerInstance(instance)
+    if instance:IsA("BasePart") then
+        local collectible = resolveCollectible(instance)
+
+        if collectible then
+            Tracked[collectible] = true
+        end
+    elseif instance:IsA("Model") and hasCollectibleMarker(instance) then
+        Tracked[instance] = true
+    end
+end
+
+workspace.DescendantAdded:Connect(registerInstance)
+
+workspace.DescendantRemoving:Connect(function(instance)
+    Tracked[instance] = nil
+    BlockedUntil[instance] = nil
+
+    if CurrentTarget == instance then
+        CurrentTarget = nil
     end
 end)
 
--- [ HỆ THỐNG AUTO FARM (SPAM CLICK) ]
+CollectionService
+    :GetInstanceAddedSignal(Config.CollectibleTag)
+    :Connect(registerInstance)
+
+-- Quét một lần khi khởi động, sau đó sử dụng cache
 task.spawn(function()
-    while task.wait(0.05) do
-        if _G_Atlas.Farming then
-            local char = LocalPlayer.Character
-            if char then
-                local tool = char:FindFirstChildOfClass("Tool")
-                if not tool then
-                    local bpTool = LocalPlayer.Backpack:FindFirstChildOfClass("Tool")
-                    if bpTool then 
-                        bpTool.Parent = char 
-                        tool = bpTool
-                    end
-                end
-                if tool then
-                    tool:Activate()
-                end
-            end
+    local descendants = workspace:GetDescendants()
+
+    for index, instance in ipairs(descendants) do
+        registerInstance(instance)
+
+        -- Chia nhỏ công việc để tránh đứng hình trên máy yếu
+        if index % 800 == 0 then
+            task.wait()
         end
     end
 end)
 
--- [ LÕI ATLAS QUÉT & LƯỚT ]
-local function GetClosestToken(rootPos)
+local function getCharacter()
+    local character = Player.Character
+    if not character then
+        return nil
+    end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local root = character:FindFirstChild("HumanoidRootPart")
+
+    if not humanoid or not root or humanoid.Health <= 0 then
+        return nil
+    end
+
+    return character, humanoid, root
+end
+
+local function getTargetPosition(target)
+    if target:IsA("BasePart") then
+        return target.Position
+    end
+
+    if target:IsA("Model") then
+        local part = target.PrimaryPart
+            or target:FindFirstChildWhichIsA("BasePart", true)
+
+        return part and part.Position or nil
+    end
+
+    return nil
+end
+
+local function horizontalDistance(a, b)
+    local difference = a - b
+    return Vector2.new(difference.X, difference.Z).Magnitude
+end
+
+local function getClosestTarget(rootPosition)
+    if not FieldCenter then
+        return nil
+    end
+
     local closest = nil
-    local minDist = _G_Atlas.TokenRadius
-    
-    -- Cấu trúc quét diện rộng tối ưu
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and not _G_Atlas.Blacklist[obj] then
-            local name = string.lower(obj.Name)
-            if name == "token" or name == "drop" or name == "coin" or name == "c" then
-                local dist = (obj.Position - rootPos).Magnitude
-                if dist <= minDist then
-                    minDist = dist
-                    closest = obj
+    local closestDistance = Config.ScanRadius
+    local now = os.clock()
+
+    for target in pairs(Tracked) do
+        if not target:IsDescendantOf(workspace) then
+            Tracked[target] = nil
+            BlockedUntil[target] = nil
+        elseif not BlockedUntil[target] or BlockedUntil[target] <= now then
+            local position = getTargetPosition(target)
+
+            if position
+                and horizontalDistance(position, FieldCenter) <= Config.FieldRadius
+            then
+                local distance = (position - rootPosition).Magnitude
+
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closest = target
                 end
             end
         end
     end
+
     return closest
 end
 
+local function walkToTarget(target, humanoid, root)
+    local deadline = os.clock() + Config.MoveTimeout
+    local lastGoal = nil
+
+    while Enabled and os.clock() < deadline do
+        if humanoid.Health <= 0 then
+            return false
+        end
+
+        -- Vật phẩm biến mất nghĩa là server đã thu thập nó
+        if not target:IsDescendantOf(workspace) then
+            return true
+        end
+
+        local targetPosition = getTargetPosition(target)
+        if not targetPosition then
+            return false
+        end
+
+        local distance = (root.Position - targetPosition).Magnitude
+
+        if distance <= Config.ReachDistance then
+            humanoid:MoveTo(targetPosition)
+            task.wait(Config.PickupWait)
+            return true
+        end
+
+        if not lastGoal or (targetPosition - lastGoal).Magnitude >= 2 then
+            humanoid:MoveTo(targetPosition)
+            lastGoal = targetPosition
+        end
+
+        task.wait(0.15)
+    end
+
+    return false
+end
+
+local function getRandomPatrolPoint(character)
+    local angle = math.random() * math.pi * 2
+    local radius = math.sqrt(math.random()) * Config.FieldRadius * 0.85
+
+    local flatPosition = FieldCenter + Vector3.new(
+        math.cos(angle) * radius,
+        0,
+        math.sin(angle) * radius
+    )
+
+    local raycastParameters = RaycastParams.new()
+    raycastParameters.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParameters.FilterDescendantsInstances = { character }
+
+    local result = workspace:Raycast(
+        flatPosition + Vector3.new(0, 60, 0),
+        Vector3.new(0, -140, 0),
+        raycastParameters
+    )
+
+    if result then
+        return result.Position + Vector3.new(0, 2, 0)
+    end
+
+    return Vector3.new(flatPosition.X, FieldCenter.Y, flatPosition.Z)
+end
+
+--==============================================================
+-- GIAO DIỆN ĐƠN GIẢN
+--==============================================================
+
+local oldGui = PlayerGui:FindFirstChild("GardenCollectorUI")
+if oldGui then
+    oldGui:Destroy()
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "GardenCollectorUI"
+gui.ResetOnSpawn = false
+gui.Parent = PlayerGui
+
+local frame = Instance.new("Frame")
+frame.AnchorPoint = Vector2.new(0.5, 0)
+frame.Position = UDim2.new(0.5, 0, 0, 35)
+frame.Size = UDim2.fromOffset(270, 130)
+frame.BackgroundColor3 = Color3.fromRGB(30, 32, 40)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -20, 0, 35)
+title.Position = UDim2.fromOffset(10, 5)
+title.BackgroundTransparency = 1
+title.Text = "🐝 Garden Collector"
+title.TextColor3 = Color3.fromRGB(255, 220, 80)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 17
+title.Parent = frame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(1, -20, 0, 42)
+toggleButton.Position = UDim2.fromOffset(10, 43)
+toggleButton.BackgroundColor3 = Color3.fromRGB(45, 170, 95)
+toggleButton.Text = "BẮT ĐẦU"
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 16
+toggleButton.Parent = frame
+
+local buttonCorner = Instance.new("UICorner")
+buttonCorner.CornerRadius = UDim.new(0, 9)
+buttonCorner.Parent = toggleButton
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 30)
+status.Position = UDim2.fromOffset(10, 92)
+status.BackgroundTransparency = 1
+status.Text = "Đứng giữa khu vườn rồi bấm Bắt đầu"
+status.TextColor3 = Color3.fromRGB(210, 210, 215)
+status.Font = Enum.Font.Gotham
+status.TextSize = 12
+status.TextWrapped = true
+status.Parent = frame
+
+local function stopMoving()
+    local _, humanoid, root = getCharacter()
+
+    if humanoid and root then
+        humanoid:MoveTo(root.Position)
+    end
+end
+
+local function updateButton()
+    if Enabled then
+        toggleButton.Text = "DỪNG"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(200, 70, 70)
+    else
+        toggleButton.Text = "BẮT ĐẦU"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(45, 170, 95)
+    end
+end
+
+toggleButton.Activated:Connect(function()
+    if Enabled then
+        Enabled = false
+        CurrentTarget = nil
+        status.Text = "Đã dừng"
+        stopMoving()
+    else
+        local _, _, root = getCharacter()
+
+        if not root then
+            status.Text = "Không tìm thấy nhân vật"
+            return
+        end
+
+        -- Vị trí hiện tại trở thành tâm khu vườn
+        FieldCenter = root.Position
+        Enabled = true
+        status.Text = "Đang tìm vật phẩm..."
+    end
+
+    updateButton()
+end)
+
+--==============================================================
+-- VÒNG LẶP THU THẬP VÀ ĐI TUẦN TRA
+--==============================================================
+
 task.spawn(function()
-    while task.wait() do -- Chạy bằng tốc độ khung hình (Siêu mượt)
-        if _G_Atlas.Collecting then
-            local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local root = char.HumanoidRootPart
-                
-                if _G_Atlas.CurrentTarget and _G_Atlas.CurrentTarget.Parent then
-                    local dist = (root.Position - _G_Atlas.CurrentTarget.Position).Magnitude
-                    
-                    -- Nếu đã ăn được token (khoảng cách cực gần)
-                    if dist <= 3.5 then
-                        if _G_Atlas.ActiveTween then _G_Atlas.ActiveTween:Cancel() end
-                        _G_Atlas.CurrentTarget = nil
-                        _G_Atlas.ActiveTween = nil
+    while gui.Parent do
+        if not Enabled then
+            task.wait(0.25)
+        else
+            local character, humanoid, root = getCharacter()
+
+            if not character then
+                status.Text = "Đang chờ nhân vật..."
+                task.wait(0.5)
+            else
+                local target = getClosestTarget(root.Position)
+
+                if target then
+                    CurrentTarget = target
+                    status.Text = "Đang tới: " .. target.Name
+
+                    local reached = walkToTarget(target, humanoid, root)
+
+                    if target:IsDescendantOf(workspace) then
+                        BlockedUntil[target] = os.clock()
+                            + (reached and 2 or Config.FailedTargetCooldown)
                     end
+
+                    CurrentTarget = nil
                 else
-                    -- Tìm mục tiêu mới
-                    local target = GetClosestToken(root.Position)
-                    
-                    if target then
-                        _G_Atlas.CurrentTarget = target
-                        local dist = (root.Position - target.Position).Magnitude
-                        local timeToTravel = dist / _G_Atlas.GlideSpeed
-                        
-                        local tweenInfo = TweenInfo.new(timeToTravel, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-                        -- Lướt sát mặt đất để đảm bảo chạm vào token
-                        local goal = {CFrame = target.CFrame} 
-                        
-                        _G_Atlas.ActiveTween = TweenService:Create(root, tweenInfo, goal)
-                        _G_Atlas.ActiveTween:Play()
-                        
-                        -- Timeout Watchdog: Kẹt quá 3 giây thì ném vào danh sách đen
-                        task.spawn(function()
-                            local checkTarget = target
-                            task.wait(timeToTravel + 1.5)
-                            if _G_Atlas.CurrentTarget == checkTarget and checkTarget.Parent then
-                                _G_Atlas.Blacklist[checkTarget] = true
-                                _G_Atlas.CurrentTarget = nil
-                                if _G_Atlas.ActiveTween then _G_Atlas.ActiveTween:Cancel() end
-                            end
-                        end)
+                    status.Text = "Không có vật phẩm — đang đi tuần tra"
+
+                    local patrolPoint = getRandomPatrolPoint(character)
+                    humanoid:MoveTo(patrolPoint)
+
+                    local deadline = os.clock() + Config.PatrolMoveTime
+
+                    while Enabled and os.clock() < deadline do
+                        if humanoid.Health <= 0 then
+                            break
+                        end
+
+                        -- Ngừng tuần tra ngay khi xuất hiện vật phẩm
+                        if getClosestTarget(root.Position) then
+                            break
+                        end
+
+                        if horizontalDistance(root.Position, patrolPoint) <= 4 then
+                            break
+                        end
+
+                        task.wait(0.25)
                     end
                 end
             end
         end
+    end
+end)
+
+Player.CharacterRemoving:Connect(function()
+    if Enabled then
+        Enabled = false
+        CurrentTarget = nil
+        status.Text = "Nhân vật hồi sinh — hãy bật lại"
+        updateButton()
     end
 end)
