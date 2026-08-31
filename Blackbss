@@ -1,769 +1,228 @@
--- LocalScript: Worker Drone AI - Client State Machine
+-- ==============================================================================
+-- ATLAS MOD FRAMEWORK BASE (BEE SWARM SIMULATOR CLONE)
+-- Tối ưu hóa: Luau, OOP, Task Library, TweenService, Non-Yielding Loops
+-- ==============================================================================
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-if not RunService:IsClient() then
-	error("Worker Drone AI phải được chạy bằng LocalScript phía Client.")
-end
+local LocalPlayer = Players.LocalPlayer
 
-local localPlayer = Players.LocalPlayer
-
---==================================================
--- CẤU HÌNH
---==================================================
-
-local Configuration = {
-	-- THAY tọa độ này thành vị trí trung tâm cánh đồng cần thu hoạch.
-	FieldPosition = Vector3.new(0, 5, 0),
-
-	-- THAY tọa độ này thành vị trí đứng trước tổ ong.
-	HivePosition = Vector3.new(50, 5, 0),
-
-	-- THAY bằng tên chính xác của Tool nằm trong Backpack.
-	ToolName = "HarvestTool",
-
-	-- Vận tốc di chuyển nhân vật, tính theo stud/giây.
-	MovementSpeed = 32,
-
-	-- Khoảng cách tối đa trước khi nhân vật được đưa lại về cánh đồng.
-	FieldRepositionDistance = 6,
-
-	-- Khoảng cách được xem là đã đến đích.
-	ArrivalTolerance = 1,
-
-	-- Khoảng nghỉ giữa mỗi lần Tool:Activate().
-	ToolActivationInterval = 0.20,
-
-	-- Bán kính quét Collectible quanh nhân vật.
-	CollectionRadius = 20,
-
-	-- Vận tốc Tween hạt tài nguyên về phía nhân vật.
-	CollectibleTweenSpeed = 65,
-
-	-- Thời gian chờ trước khi quét Collectible lần tiếp theo.
-	CollectionScanInterval = 0.15,
-
-	-- Tránh Tween liên tục cùng một Part nếu nó chưa bị xóa.
-	CollectibleTweenCooldown = 0.75,
-
-	-- Giới hạn Tween đồng thời nhằm tránh gây giật.
-	MaximumConcurrentCollectibleTweens = 12,
-
-	-- Thời gian chờ tại tổ ong.
-	ConversionDuration = 5,
-
-	-- Khoảng nghỉ của vòng lặp State Machine.
-	MainLoopInterval = 0.15,
+-- ==========================================
+-- MODULE: CẤU HÌNH (CONFIGURATION)
+-- ==========================================
+local Config = {
+    FarmSpeed = 25, -- Tốc độ Tween (WalkSpeed mô phỏng)
+    TokenRadius = 40, -- Bán kính quét vật phẩm (Studs)
+    SafeDistance = 25, -- Khoảng cách né quái
+    FieldVectors = {
+        Sunflower = Vector3.new(100, 5, 150), -- Tọa độ ví dụ của Cánh đồng
+        Mushroom = Vector3.new(-50, 5, 120)
+    },
+    HiveLocation = Vector3.new(0, 5, 20) -- Tọa độ tổ ong của người chơi
 }
 
-assert(Configuration.MovementSpeed > 0, "MovementSpeed phải lớn hơn 0.")
-assert(Configuration.CollectibleTweenSpeed > 0, "CollectibleTweenSpeed phải lớn hơn 0.")
+-- ==========================================
+-- MODULE CHÍNH: AUTOFARM (CORE FRAMEWORK)
+-- ==========================================
+local AtlasFarm = {}
+AtlasFarm.__index = AtlasFarm
 
---==================================================
--- CÁC TRẠNG THÁI
---==================================================
-
-local WorkerState = table.freeze({
-	Waiting = "WAITING",
-	MovingToField = "MOVING_TO_FIELD",
-	Farming = "FARM",
-	MovingToHive = "MOVING_TO_HIVE",
-	Converting = "CONVERT",
-})
-
-local OperatingMode = table.freeze({
-	Farm = "FARM",
-	Convert = "CONVERT",
-})
-
-local currentWorkerState = WorkerState.Waiting
-local scriptIsRunning = true
-
-local function changeWorkerState(nextState)
-	if currentWorkerState == nextState then
-		return
-	end
-
-	currentWorkerState = nextState
-
-	if script.Parent then
-		script:SetAttribute("WorkerDroneState", nextState)
-	end
+function AtlasFarm.new()
+    local self = setmetatable({}, AtlasFarm)
+    self.Player = LocalPlayer
+    self.Character = self.Player.Character or self.Player.CharacterAdded:Wait()
+    self.RootPart = self.Character:WaitForChild("HumanoidRootPart")
+    self.Humanoid = self.Character:WaitForChild("Humanoid")
+    
+    self.IsRunning = false
+    self.CurrentField = nil
+    self.State = "IDLE" -- Các trạng thái: IDLE, FARMING, CONVERTING, EVADING
+    self.Cooldowns = {}
+    
+    return self
 end
 
-script:SetAttribute("WorkerDroneState", currentWorkerState)
+-- ==========================================
+-- 1. CƠ CHẾ DI CHUYỂN & THU THẬP (MOVEMENT & FARMING)
+-- ==========================================
 
---==================================================
--- ĐỌC DỮ LIỆU LEADERSTATS
--- Hỗ trợ cả NumberValue/IntValue và Attribute.
---==================================================
-
-local function readNumericStat(statName)
-	local leaderstats = localPlayer:FindFirstChild("leaderstats")
-
-	if not leaderstats then
-		return nil
-	end
-
-	local statObject = leaderstats:FindFirstChild(statName)
-
-	if statObject and
-		(statObject:IsA("NumberValue") or statObject:IsA("IntValue")) then
-		return statObject.Value
-	end
-
-	local attributeValue = leaderstats:GetAttribute(statName)
-
-	if typeof(attributeValue) == "number" then
-		return attributeValue
-	end
-
-	return nil
+-- Hàm di chuyển mượt mà bằng TweenService
+function AtlasFarm:TweenTo(targetPosition)
+    if not self.RootPart then return end
+    
+    local distance = (self.RootPart.Position - targetPosition).Magnitude
+    local timeToTravel = distance / Config.FarmSpeed
+    
+    local tweenInfo = TweenInfo.new(timeToTravel, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut)
+    local goal = {CFrame = CFrame.new(targetPosition)}
+    
+    local tween = TweenService:Create(self.RootPart, tweenInfo, goal)
+    tween:Play()
+    tween.Completed:Wait() -- Chờ Tween chạy xong mà không block luồng nếu bọc trong task
 end
 
-local function determineOperatingMode()
-	local pollen = readNumericStat("Pollen")
-	local capacity = readNumericStat("Capacity")
-
-	if pollen == nil or capacity == nil or capacity <= 0 then
-		return nil, pollen, capacity
-	end
-
-	if pollen < capacity then
-		return OperatingMode.Farm, pollen, capacity
-	end
-
-	return OperatingMode.Convert, pollen, capacity
+-- Thuật toán di chuyển Zigzag để gom phấn hoa
+function AtlasFarm:FarmZigzag(fieldCenter)
+    local width, length = 30, 30 -- Kích thước cánh đồng
+    local step = 5
+    
+    for x = -width/2, width/2, step do
+        for z = -length/2, length/2, step do
+            if self.State ~= "FARMING" then return end -- Ngắt ngang nếu phải về tổ
+            
+            -- Tính toán tọa độ tiếp theo
+            local target = fieldCenter + Vector3.new(x, 0, (x % (step*2) == 0) and z or -z)
+            self:TweenTo(target)
+        end
+    end
 end
 
-local function currentModeIs(expectedMode)
-	local currentMode = determineOperatingMode()
-	return currentMode == expectedMode
+-- Vòng lặp quét và thu thập Token bất đồng bộ
+function AtlasFarm:StartTokenCollector()
+    task.spawn(function()
+        while self.IsRunning do
+            if self.RootPart then
+                -- Giả định game lưu các token rớt ra trong Workspace.Tokens
+                local tokens = Workspace:FindFirstChild("Tokens")
+                if tokens then
+                    for _, token in ipairs(tokens:GetChildren()) do
+                        if token:IsA("BasePart") then
+                            local dist = (self.RootPart.Position - token.Position).Magnitude
+                            if dist <= Config.TokenRadius then
+                                -- Bắn Remote Event nhặt token tới Server (Cấu hình lại ID/Tên Remote tùy game)
+                                -- ReplicatedStorage.Remotes.CollectToken:FireServer(token)
+                                token:Destroy() -- Xóa cục bộ để giảm lag (Server sẽ xử lý sau)
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.1) -- Tối ưu hiệu suất, không dùng wait()
+        end
+    end)
 end
 
---==================================================
--- LẤY CHARACTER, HUMANOID VÀ ROOT PART
---==================================================
+-- ==========================================
+-- 2. QUẢN LÝ KHO CHỨA (INVENTORY & RETURN BASE)
+-- ==========================================
 
-local function getCharacterContext()
-	local character = localPlayer.Character
-
-	if not character or not character.Parent then
-		return nil, nil, nil, nil
-	end
-
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-
-	if not humanoid or
-		not humanoidRootPart or
-		not humanoidRootPart:IsA("BasePart") then
-		return character, humanoid, nil, nil
-	end
-
-	local characterPrimaryPart = character.PrimaryPart or humanoidRootPart
-
-	return character, humanoid, humanoidRootPart, characterPrimaryPart
+-- Kiểm tra sức chứa của Balo (Return: Tỷ lệ %)
+function AtlasFarm:GetBackpackPercentage()
+    -- Thay thế đường dẫn này bằng GUI hoặc Stats thật của game
+    -- Ví dụ: local current = self.Player.leaderstats.Pollen.Value
+    local currentPollen = 100 -- Fake data
+    local maxCapacity = 100 -- Fake data
+    
+    return (currentPollen / maxCapacity) * 100
 end
 
---==================================================
--- HỆ THỐNG TWEEN DI CHUYỂN NHÂN VẬT
---==================================================
-
-local activeMovementTween = nil
-local movementRevision = 0
-
-local function cancelActiveMovement()
-	movementRevision += 1
-
-	if activeMovementTween then
-		pcall(function()
-			activeMovementTween:Cancel()
-		end)
-
-		activeMovementTween = nil
-	end
+-- Logic Convert Mật Ong
+function AtlasFarm:ReturnAndConvert()
+    self.State = "CONVERTING"
+    
+    -- 1. Di chuyển về tổ ong
+    self:TweenTo(Config.HiveLocation)
+    task.wait(0.5)
+    
+    -- 2. Kích hoạt Make Honey (Gọi Remote)
+    print("[Atlas] Đang chuyển hóa phấn hoa thành mật...")
+    -- ReplicatedStorage.Remotes.MakeHoney:FireServer()
+    
+    -- 3. Vòng lặp chờ balo trống
+    while self:GetBackpackPercentage() > 0 do
+        task.wait(0.5)
+    end
+    
+    print("[Atlas] Đã chuyển hóa xong, quay lại cánh đồng.")
+    self.State = "FARMING"
 end
 
-local function tweenCharacterTo(targetPosition, abortCondition)
-	local character, humanoid, humanoidRootPart = getCharacterContext()
+-- ==========================================
+-- 3. TÍNH NĂNG HỖ TRỢ C NÂNG CAO (COMBAT & BUFFS)
+-- ==========================================
 
-	if not character or
-		not humanoid or
-		not humanoidRootPart or
-		humanoid.Health <= 0 then
-		return false
-	end
-
-	cancelActiveMovement()
-	local thisMovementRevision = movementRevision
-
-	local distance = (humanoidRootPart.Position - targetPosition).Magnitude
-	local rotationOnly = humanoidRootPart.CFrame - humanoidRootPart.Position
-	local targetCFrame = CFrame.new(targetPosition) * rotationOnly
-
-	if distance <= Configuration.ArrivalTolerance then
-		pcall(function()
-			humanoidRootPart.CFrame = targetCFrame
-			humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
-			humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
-		end)
-
-		return true
-	end
-
-	local movementDuration = math.max(
-		distance / Configuration.MovementSpeed,
-		0.05
-	)
-
-	local movementTween = TweenService:Create(
-		humanoidRootPart,
-		TweenInfo.new(
-			movementDuration,
-			Enum.EasingStyle.Linear,
-			Enum.EasingDirection.Out
-		),
-		{
-			CFrame = targetCFrame,
-		}
-	)
-
-	activeMovementTween = movementTween
-
-	local originalAutoRotate = humanoid.AutoRotate
-	humanoid.AutoRotate = false
-	humanoid:Move(Vector3.zero, false)
-
-	pcall(function()
-		humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
-		humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
-	end)
-
-	local movementFinished = false
-	local completedPlaybackState = nil
-
-	local completedConnection = movementTween.Completed:Connect(function(playbackState)
-		completedPlaybackState = playbackState
-		movementFinished = true
-	end)
-
-	local playedSuccessfully, playError = pcall(function()
-		movementTween:Play()
-	end)
-
-	if not playedSuccessfully then
-		completedConnection:Disconnect()
-
-		if activeMovementTween == movementTween then
-			activeMovementTween = nil
-		end
-
-		if humanoid.Parent then
-			humanoid.AutoRotate = originalAutoRotate
-		end
-
-		warn("Không thể chạy Tween di chuyển:", playError)
-		return false
-	end
-
-	local movementTimeout = os.clock() + movementDuration + 2
-
-	while scriptIsRunning and not movementFinished do
-		local shouldAbort =
-			movementRevision ~= thisMovementRevision
-			or not humanoidRootPart.Parent
-			or humanoid.Health <= 0
-			or os.clock() >= movementTimeout
-
-		if not shouldAbort and abortCondition then
-			local conditionSucceeded, conditionResult = pcall(abortCondition)
-
-			if not conditionSucceeded or conditionResult == true then
-				shouldAbort = true
-			end
-		end
-
-		if shouldAbort then
-			pcall(function()
-				movementTween:Cancel()
-			end)
-
-			break
-		end
-
-		task.wait(0.05)
-	end
-
-	if not movementFinished then
-		pcall(function()
-			movementTween:Cancel()
-		end)
-
-		local cancellationTimeout = os.clock() + 0.25
-
-		while not movementFinished and os.clock() < cancellationTimeout do
-			task.wait()
-		end
-	end
-
-	completedConnection:Disconnect()
-
-	if activeMovementTween == movementTween then
-		activeMovementTween = nil
-	end
-
-	if humanoid.Parent then
-		humanoid.AutoRotate = originalAutoRotate
-	end
-
-	local movementCompleted =
-		movementFinished
-		and completedPlaybackState == Enum.PlaybackState.Completed
-		and movementRevision == thisMovementRevision
-
-	if movementCompleted and humanoidRootPart.Parent then
-		pcall(function()
-			humanoidRootPart.CFrame = targetCFrame
-			humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
-			humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
-		end)
-	end
-
-	return movementCompleted
+-- Kích hoạt vật phẩm dựa trên thời gian hồi chiêu
+function AtlasFarm:UseItem(itemName, cooldownTime)
+    local lastUsed = self.Cooldowns[itemName] or 0
+    local currentTime = tick()
+    
+    if currentTime - lastUsed >= cooldownTime then
+        print("[Atlas] Đang sử dụng vật phẩm: " .. itemName)
+        -- ReplicatedStorage.Remotes.UseItem:FireServer(itemName)
+        self.Cooldowns[itemName] = currentTime
+    end
 end
 
---==================================================
--- HỆ THỐNG TỰ ĐỘNG TRANG BỊ VÀ KÍCH HOẠT TOOL
---==================================================
-
-local toolSystemEnabled = false
-local toolWorkerRevision = 0
-
-local function findConfiguredTool(character)
-	if character then
-		local equippedTool = character:FindFirstChild(Configuration.ToolName)
-
-		if equippedTool and equippedTool:IsA("Tool") then
-			return equippedTool
-		end
-	end
-
-	local backpack = localPlayer:FindFirstChild("Backpack")
-
-	if backpack then
-		local backpackTool = backpack:FindFirstChild(Configuration.ToolName)
-
-		if backpackTool and backpackTool:IsA("Tool") then
-			return backpackTool
-		end
-	end
-
-	return nil
+-- Cơ chế né tránh quái vật (Zone Checking)
+function AtlasFarm:StartEvadeSystem()
+    task.spawn(function()
+        while self.IsRunning do
+            if self.RootPart then
+                -- Giả định quái nằm trong Workspace.Monsters
+                local monsters = Workspace:FindFirstChild("Monsters")
+                if monsters then
+                    for _, mob in ipairs(monsters:GetChildren()) do
+                        if mob:FindFirstChild("HumanoidRootPart") then
+                            local dist = (self.RootPart.Position - mob.HumanoidRootPart.Position).Magnitude
+                            if dist < Config.SafeDistance then
+                                self.State = "EVADING"
+                                -- Lùi lại theo hướng ngược lại với quái
+                                local runDirection = (self.RootPart.Position - mob.HumanoidRootPart.Position).Unit
+                                local safePos = self.RootPart.Position + (runDirection * 20)
+                                self:TweenTo(safePos)
+                                self.State = "FARMING"
+                            end
+                        end
+                    end
+                end
+            end
+            RunService.Heartbeat:Wait() -- Chạy theo từng frame, cực kỳ mượt và không delay
+        end
+    end)
 end
 
-local function stopToolSystem()
-	toolSystemEnabled = false
-	toolWorkerRevision += 1
-
-	local character = localPlayer.Character
-	local configuredTool = findConfiguredTool(character)
-
-	if configuredTool then
-		pcall(function()
-			configuredTool:Deactivate()
-		end)
-
-		local backpack = localPlayer:FindFirstChild("Backpack")
-
-		if backpack and character and configuredTool.Parent == character then
-			pcall(function()
-				configuredTool.Parent = backpack
-			end)
-		end
-	end
+-- ==========================================
+-- HÀM KHỞI ĐỘNG (MAIN LOOP)
+-- ==========================================
+function AtlasFarm:Start()
+    if self.IsRunning then return end
+    self.IsRunning = true
+    self.State = "FARMING"
+    
+    print("[Atlas] Khởi động hệ thống...")
+    
+    -- Bật các tiến trình chạy ngầm (Threads)
+    self:StartTokenCollector()
+    self:StartEvadeSystem()
+    
+    -- Vòng lặp Farm chính
+    task.spawn(function()
+        while self.IsRunning do
+            if self.State == "FARMING" then
+                -- 1. Kiểm tra Balo
+                if self:GetBackpackPercentage() >= 100 then
+                    self:ReturnAndConvert()
+                else
+                    -- 2. Buff kỹ năng (Ví dụ cắm Sprinkler mỗi 30 giây)
+                    self:UseItem("Sprinkler", 30)
+                    
+                    -- 3. Farm tại cánh đồng
+                    self.CurrentField = Config.FieldVectors.Sunflower
+                    self:FarmZigzag(self.CurrentField)
+                end
+            end
+            task.wait(0.1)
+        end
+    end)
 end
 
-local function startToolSystem()
-	if toolSystemEnabled then
-		return
-	end
-
-	toolSystemEnabled = true
-	toolWorkerRevision += 1
-
-	local thisToolWorkerRevision = toolWorkerRevision
-
-	task.spawn(function()
-		while scriptIsRunning
-			and toolSystemEnabled
-			and toolWorkerRevision == thisToolWorkerRevision do
-
-			local character, humanoid = getCharacterContext()
-
-			if character and humanoid and humanoid.Health > 0 then
-				local configuredTool = findConfiguredTool(character)
-
-				if configuredTool then
-					if configuredTool.Parent ~= character then
-						pcall(function()
-							humanoid:EquipTool(configuredTool)
-						end)
-
-						task.wait(0.05)
-					end
-
-					if configuredTool.Parent == character then
-						pcall(function()
-							configuredTool:Activate()
-						end)
-					end
-				end
-			end
-
-			task.wait(math.max(
-				Configuration.ToolActivationInterval,
-				0.03
-			))
-		end
-	end)
+function AtlasFarm:Stop()
+    self.IsRunning = false
+    self.State = "IDLE"
+    print("[Atlas] Đã tắt hệ thống.")
 end
 
---==================================================
--- HỆ THỐNG QUÉT VÀ TWEEN COLLECTIBLE
---==================================================
-
-local collectorSystemEnabled = false
-local collectorWorkerRevision = 0
-
-local activeCollectibleTweens = setmetatable({}, {
-	__mode = "k",
-})
-
-local collectibleLastTweenTime = setmetatable({}, {
-	__mode = "k",
-})
-
-local function countActiveCollectibleTweens()
-	local activeCount = 0
-
-	for collectiblePart in pairs(activeCollectibleTweens) do
-		if collectiblePart.Parent then
-			activeCount += 1
-		else
-			activeCollectibleTweens[collectiblePart] = nil
-		end
-	end
-
-	return activeCount
-end
-
-local function tweenCollectibleToCharacter(
-	collectiblePart,
-	humanoidRootPart
-)
-	if activeCollectibleTweens[collectiblePart] then
-		return false
-	end
-
-	local currentTime = os.clock()
-	local previousTweenTime = collectibleLastTweenTime[collectiblePart]
-
-	if previousTweenTime and
-		currentTime - previousTweenTime
-			< Configuration.CollectibleTweenCooldown then
-		return false
-	end
-
-	if not collectiblePart.Parent or not humanoidRootPart.Parent then
-		return false
-	end
-
-	local distance = (
-		collectiblePart.Position - humanoidRootPart.Position
-	).Magnitude
-
-	if distance > Configuration.CollectionRadius then
-		return false
-	end
-
-	local tweenDuration = math.max(
-		distance / Configuration.CollectibleTweenSpeed,
-		0.05
-	)
-
-	local collectibleRotation = (
-		collectiblePart.CFrame - collectiblePart.Position
-	)
-
-	local targetCFrame =
-		CFrame.new(humanoidRootPart.Position)
-		* collectibleRotation
-
-	local creationSucceeded, collectibleTween = pcall(function()
-		return TweenService:Create(
-			collectiblePart,
-			TweenInfo.new(
-				tweenDuration,
-				Enum.EasingStyle.Quad,
-				Enum.EasingDirection.Out
-			),
-			{
-				CFrame = targetCFrame,
-			}
-		)
-	end)
-
-	if not creationSucceeded or not collectibleTween then
-		return false
-	end
-
-	collectibleLastTweenTime[collectiblePart] = currentTime
-	activeCollectibleTweens[collectiblePart] = collectibleTween
-
-	task.spawn(function()
-		pcall(function()
-			collectibleTween:Play()
-			collectibleTween.Completed:Wait()
-		end)
-
-		if activeCollectibleTweens[collectiblePart]
-			== collectibleTween then
-			activeCollectibleTweens[collectiblePart] = nil
-		end
-	end)
-
-	return true
-end
-
-local function stopCollectorSystem()
-	collectorSystemEnabled = false
-	collectorWorkerRevision += 1
-
-	for _, collectibleTween in pairs(activeCollectibleTweens) do
-		pcall(function()
-			collectibleTween:Cancel()
-		end)
-	end
-end
-
-local function startCollectorSystem()
-	if collectorSystemEnabled then
-		return
-	end
-
-	collectorSystemEnabled = true
-	collectorWorkerRevision += 1
-
-	local thisCollectorWorkerRevision = collectorWorkerRevision
-
-	task.spawn(function()
-		while scriptIsRunning
-			and collectorSystemEnabled
-			and collectorWorkerRevision == thisCollectorWorkerRevision do
-
-			local _, humanoid, humanoidRootPart, characterPrimaryPart =
-				getCharacterContext()
-
-			if humanoid
-				and humanoid.Health > 0
-				and humanoidRootPart
-				and characterPrimaryPart then
-
-				local collectiblesFolder =
-					Workspace:FindFirstChild("Collectibles")
-
-				if collectiblesFolder then
-					local availableTweenSlots =
-						Configuration.MaximumConcurrentCollectibleTweens
-						- countActiveCollectibleTweens()
-
-					if availableTweenSlots > 0 then
-						for _, collectiblePart
-							in ipairs(collectiblesFolder:GetDescendants()) do
-
-							if not collectorSystemEnabled
-								or collectorWorkerRevision
-									~= thisCollectorWorkerRevision then
-								break
-							end
-
-							if collectiblePart:IsA("BasePart")
-								and collectiblePart.Parent
-								and collectiblePart ~= humanoidRootPart then
-
-								local distanceFromCharacter = (
-									collectiblePart.Position
-									- characterPrimaryPart.Position
-								).Magnitude
-
-								if distanceFromCharacter
-									<= Configuration.CollectionRadius then
-
-									local tweenStarted =
-										tweenCollectibleToCharacter(
-											collectiblePart,
-											humanoidRootPart
-										)
-
-									if tweenStarted then
-										availableTweenSlots -= 1
-
-										if availableTweenSlots <= 0 then
-											break
-										end
-									end
-								end
-							end
-						end
-					end
-				end
-			end
-
-			task.wait(math.max(
-				Configuration.CollectionScanInterval,
-				0.05
-			))
-		end
-	end)
-end
-
---==================================================
--- XỬ LÝ RESPAWN VÀ DỪNG SCRIPT
---==================================================
-
-localPlayer.CharacterAdded:Connect(function()
-	stopToolSystem()
-	stopCollectorSystem()
-	cancelActiveMovement()
-	changeWorkerState(WorkerState.Waiting)
-end)
-
-script.Destroying:Connect(function()
-	scriptIsRunning = false
-	stopToolSystem()
-	stopCollectorSystem()
-	cancelActiveMovement()
-end)
-
---==================================================
--- VÒNG LẶP STATE MACHINE TRUNG TÂM
---==================================================
-
-local missingStatsWarningDisplayed = false
-
-local function runMainControlLoop()
-	while scriptIsRunning do
-		local desiredMode = determineOperatingMode()
-
-		if desiredMode == nil then
-			if currentWorkerState ~= WorkerState.Waiting then
-				stopToolSystem()
-				stopCollectorSystem()
-				cancelActiveMovement()
-				changeWorkerState(WorkerState.Waiting)
-			end
-
-			if not missingStatsWarningDisplayed then
-				missingStatsWarningDisplayed = true
-
-				warn(
-					"Worker Drone đang chờ leaderstats.Pollen "
-					.. "và leaderstats.Capacity."
-				)
-			end
-
-		elseif desiredMode == OperatingMode.Farm then
-			missingStatsWarningDisplayed = false
-
-			local _, humanoid, humanoidRootPart =
-				getCharacterContext()
-
-			local characterIsAtField =
-				humanoid
-				and humanoid.Health > 0
-				and humanoidRootPart
-				and (
-					humanoidRootPart.Position
-					- Configuration.FieldPosition
-				).Magnitude
-					<= Configuration.FieldRepositionDistance
-
-			if currentWorkerState ~= WorkerState.Farming
-				or not characterIsAtField then
-
-				stopToolSystem()
-				stopCollectorSystem()
-				changeWorkerState(WorkerState.MovingToField)
-
-				local reachedField = tweenCharacterTo(
-					Configuration.FieldPosition,
-					function()
-						return not currentModeIs(OperatingMode.Farm)
-					end
-				)
-
-				if reachedField
-					and currentModeIs(OperatingMode.Farm) then
-
-					changeWorkerState(WorkerState.Farming)
-					startToolSystem()
-					startCollectorSystem()
-				else
-					changeWorkerState(WorkerState.Waiting)
-				end
-			else
-				startToolSystem()
-				startCollectorSystem()
-			end
-
-		elseif desiredMode == OperatingMode.Convert then
-			missingStatsWarningDisplayed = false
-
-			-- Ngừng Tool và Collector ngay khi Capacity đầy.
-			stopToolSystem()
-			stopCollectorSystem()
-
-			changeWorkerState(WorkerState.MovingToHive)
-
-			local reachedHive = tweenCharacterTo(
-				Configuration.HivePosition,
-				function()
-					return not currentModeIs(OperatingMode.Convert)
-				end
-			)
-
-			if reachedHive
-				and currentModeIs(OperatingMode.Convert) then
-
-				changeWorkerState(WorkerState.Converting)
-
-				local conversionEndTime =
-					os.clock() + Configuration.ConversionDuration
-
-				while scriptIsRunning
-					and os.clock() < conversionEndTime do
-
-					local remainingTime =
-						conversionEndTime - os.clock()
-
-					task.wait(math.min(0.10, remainingTime))
-				end
-			end
-
-			if scriptIsRunning then
-				changeWorkerState(WorkerState.Waiting)
-			end
-		end
-
-		task.wait(math.max(
-			Configuration.MainLoopInterval,
-			0.05
-		))
-	end
-end
-
-runMainControlLoop()
+return AtlasFarm
