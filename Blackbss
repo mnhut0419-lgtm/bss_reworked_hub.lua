@@ -1,6 +1,6 @@
 --==============================================================
--- GARDEN COLLECTOR V4
--- Vung 4 goc + di chuyen lien tuc + dieu chinh toc do
+-- GARDEN COLLECTOR V4.1
+-- Vung 4 goc + toc do + tu vung gay + nhac khong hoat dong
 -- Chi dung API Luau/Roblox tieu chuan.
 --==============================================================
 
@@ -19,6 +19,16 @@ local Config = {
     MaximumWalkSpeed = 250,
     WalkSpeedStep = 5,
     SpeedEnforceInterval = 0.20,
+
+    -- Chi kich hoat Tool dang cam; khong goi RemoteEvent.
+    AutoSwingEnabled = true,
+    AutoEquipTool = true,
+    PreferredToolName = "", -- De trong de dung Tool dang cam/Tool dau tien.
+    SwingInterval = 0.15,
+
+    -- Chi hien canh bao de nguoi dung tu cham man hinh.
+    IdleReminderEnabled = true,
+    IdleReminderSeconds = 18 * 60,
 
     -- Bo dieu khien tu thich nghi voi WalkSpeed hien tai.
     UpdateInterval = 0.02,
@@ -78,6 +88,7 @@ local BlockedUntil = setmetatable({}, { __mode = "k" })
 local SpeedHumanoid = nil
 local OriginalWalkSpeed = nil
 local LastSpeedEnforce = 0
+local LastUserInputAt = os.clock()
 
 --==============================================================
 -- NHAN VAT VA TOC DO
@@ -183,6 +194,39 @@ local function distanceFromPointToSegment(point, segmentStart, segmentEnd)
 
     local nearestPoint = segmentStart + segment * progress
     return (point - nearestPoint).Magnitude
+end
+
+local function findCollectorTool(character, humanoid)
+    local equippedTool = character:FindFirstChildOfClass("Tool")
+    if equippedTool then
+        return equippedTool
+    end
+
+    if not Config.AutoEquipTool then
+        return nil
+    end
+
+    local backpack = Player:FindFirstChildOfClass("Backpack")
+    if not backpack then
+        return nil
+    end
+
+    local selectedTool = nil
+
+    if Config.PreferredToolName ~= "" then
+        local exactTool = backpack:FindFirstChild(Config.PreferredToolName)
+        if exactTool and exactTool:IsA("Tool") then
+            selectedTool = exactTool
+        end
+    else
+        selectedTool = backpack:FindFirstChildOfClass("Tool")
+    end
+
+    if selectedTool then
+        humanoid:EquipTool(selectedTool)
+    end
+
+    return selectedTool
 end
 
 --==============================================================
@@ -678,7 +722,6 @@ local function returnToZoneCenter(character, humanoid, root)
         if humanoid.Health <= 0 then
             return false
         end
-
         if horizontalDistance(root.Position, centerGoal) <= Config.ReturnDistance then
             return true
         end
@@ -716,6 +759,7 @@ local function getRandomPatrolPoint(character)
 
     return getGroundPosition(ZoneCenter, character)
 end
+
 --==============================================================
 -- GIAO DIEN
 --==============================================================
@@ -733,7 +777,7 @@ gui.Parent = PlayerGui
 local frame = Instance.new("Frame")
 frame.AnchorPoint = Vector2.new(0.5, 0)
 frame.Position = UDim2.new(0.5, 0, 0, 25)
-frame.Size = UDim2.fromOffset(320, 330)
+frame.Size = UDim2.fromOffset(320, 370)
 frame.BackgroundColor3 = Color3.fromRGB(30, 32, 40)
 frame.BorderSizePixel = 0
 frame.Parent = gui
@@ -746,7 +790,7 @@ local title = Instance.new("TextLabel")
 title.Position = UDim2.fromOffset(12, 5)
 title.Size = UDim2.new(1, -55, 0, 35)
 title.BackgroundTransparency = 1
-title.Text = "Garden Collector V4"
+title.Text = "Garden Collector V4.1"
 title.TextColor3 = Color3.fromRGB(255, 220, 80)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 17
@@ -899,8 +943,20 @@ speedInput.BackgroundTransparency = 1
 speedInput.Text = ""
 speedInput.Parent = speedTrack
 
+local autoSwingButton = Instance.new("TextButton")
+autoSwingButton.Position = UDim2.fromOffset(10, 255)
+autoSwingButton.Size = UDim2.new(1, -20, 0, 35)
+autoSwingButton.TextColor3 = Color3.new(1, 1, 1)
+autoSwingButton.Font = Enum.Font.GothamBold
+autoSwingButton.TextSize = 13
+autoSwingButton.Parent = frame
+
+local autoSwingRound = Instance.new("UICorner")
+autoSwingRound.CornerRadius = UDim.new(0, 8)
+autoSwingRound.Parent = autoSwingButton
+
 local status = Instance.new("TextLabel")
-status.Position = UDim2.fromOffset(10, 258)
+status.Position = UDim2.fromOffset(10, 298)
 status.Size = UDim2.new(1, -20, 0, 60)
 status.BackgroundColor3 = Color3.fromRGB(40, 42, 51)
 status.Text = "Dung tai goc thu nhat roi bam Luu goc"
@@ -929,6 +985,58 @@ local openCorner = Instance.new("UICorner")
 openCorner.CornerRadius = UDim.new(1, 0)
 openCorner.Parent = openButton
 
+local idleReminder = Instance.new("Frame")
+idleReminder.AnchorPoint = Vector2.new(0.5, 0.5)
+idleReminder.Position = UDim2.fromScale(0.5, 0.5)
+idleReminder.Size = UDim2.fromOffset(300, 145)
+idleReminder.BackgroundColor3 = Color3.fromRGB(34, 36, 45)
+idleReminder.BorderSizePixel = 0
+idleReminder.Visible = false
+idleReminder.ZIndex = 20
+idleReminder.Parent = gui
+
+local idleReminderRound = Instance.new("UICorner")
+idleReminderRound.CornerRadius = UDim.new(0, 12)
+idleReminderRound.Parent = idleReminder
+
+local idleReminderTitle = Instance.new("TextLabel")
+idleReminderTitle.Position = UDim2.fromOffset(12, 10)
+idleReminderTitle.Size = UDim2.new(1, -24, 0, 28)
+idleReminderTitle.BackgroundTransparency = 1
+idleReminderTitle.Text = "NHAC KHONG HOAT DONG"
+idleReminderTitle.TextColor3 = Color3.fromRGB(255, 205, 70)
+idleReminderTitle.Font = Enum.Font.GothamBold
+idleReminderTitle.TextSize = 16
+idleReminderTitle.ZIndex = 21
+idleReminderTitle.Parent = idleReminder
+
+local idleReminderText = Instance.new("TextLabel")
+idleReminderText.Position = UDim2.fromOffset(12, 40)
+idleReminderText.Size = UDim2.new(1, -24, 0, 50)
+idleReminderText.BackgroundTransparency = 1
+idleReminderText.Text = "Ban da gan 20 phut khong thao tac. Hay cham nut ben duoi de lam moi hoat dong."
+idleReminderText.TextColor3 = Color3.fromRGB(225, 225, 230)
+idleReminderText.Font = Enum.Font.Gotham
+idleReminderText.TextSize = 13
+idleReminderText.TextWrapped = true
+idleReminderText.ZIndex = 21
+idleReminderText.Parent = idleReminder
+
+local idleAcknowledgeButton = Instance.new("TextButton")
+idleAcknowledgeButton.Position = UDim2.fromOffset(12, 99)
+idleAcknowledgeButton.Size = UDim2.new(1, -24, 0, 35)
+idleAcknowledgeButton.BackgroundColor3 = Color3.fromRGB(55, 160, 95)
+idleAcknowledgeButton.Text = "TOI DANG O DAY"
+idleAcknowledgeButton.TextColor3 = Color3.new(1, 1, 1)
+idleAcknowledgeButton.Font = Enum.Font.GothamBold
+idleAcknowledgeButton.TextSize = 14
+idleAcknowledgeButton.ZIndex = 21
+idleAcknowledgeButton.Parent = idleReminder
+
+local idleAcknowledgeRound = Instance.new("UICorner")
+idleAcknowledgeRound.CornerRadius = UDim.new(0, 8)
+idleAcknowledgeRound.Parent = idleAcknowledgeButton
+
 local function stopMoving()
     local _, humanoid, root = getCharacter()
     if humanoid and root then
@@ -951,6 +1059,16 @@ local function updateSpeedInterface()
     else
         speedModeButton.Text = "TOC DO RIENG: TAT - DUNG BUFF GAME"
         speedModeButton.BackgroundColor3 = Color3.fromRGB(80, 82, 92)
+    end
+end
+
+local function updateAutoSwingInterface()
+    if Config.AutoSwingEnabled then
+        autoSwingButton.Text = "TU VUNG GAY: BAT"
+        autoSwingButton.BackgroundColor3 = Color3.fromRGB(55, 150, 95)
+    else
+        autoSwingButton.Text = "TU VUNG GAY: TAT"
+        autoSwingButton.BackgroundColor3 = Color3.fromRGB(80, 82, 92)
     end
 end
 
@@ -986,6 +1104,7 @@ local function updateInterface()
     end
 
     updateSpeedInterface()
+    updateAutoSwingInterface()
 end
 
 closeButton.Activated:Connect(function()
@@ -1106,6 +1225,17 @@ speedModeButton.Activated:Connect(function()
     updateSpeedInterface()
 end)
 
+autoSwingButton.Activated:Connect(function()
+    Config.AutoSwingEnabled = not Config.AutoSwingEnabled
+    updateAutoSwingInterface()
+
+    if Config.AutoSwingEnabled then
+        status.Text = "Da bat tu vung gay. Hay trang bi cong cu thu hoach."
+    else
+        status.Text = "Da tat tu vung gay."
+    end
+end)
+
 minusButton.Activated:Connect(function()
     setSelectedSpeed(Config.SelectedWalkSpeed - Config.WalkSpeedStep)
 end)
@@ -1169,12 +1299,53 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
+UserInputService.InputBegan:Connect(function()
+    LastUserInputAt = os.clock()
+    idleReminder.Visible = false
+end)
+
+idleAcknowledgeButton.Activated:Connect(function()
+    LastUserInputAt = os.clock()
+    idleReminder.Visible = false
+end)
+
 updateInterface()
 
---==============================================================
--- VONG LAP CHINH
---==============================================================
+-- Tu vung Tool dang cam. Tool.Enabled duoc dung de ton trong hoi chieu.
+task.spawn(function()
+    while gui.Parent do
+        if Enabled and Config.AutoSwingEnabled then
+            local character, humanoid = getCharacter()
 
+            if character and humanoid then
+                local tool = findCollectorTool(character, humanoid)
+
+                if tool and tool.Parent == character and tool.Enabled then
+                    pcall(function()
+                        tool:Activate()
+                    end)
+                end
+            end
+
+            task.wait(Config.SwingInterval)
+        else
+            task.wait(0.20)
+        end
+    end
+end)
+
+-- Khong gia lap input. Chi canh bao som de nguoi dung tu cham man hinh.
+task.spawn(function()
+    while gui.Parent do
+        if Config.IdleReminderEnabled
+            and os.clock() - LastUserInputAt >= Config.IdleReminderSeconds
+        then
+            idleReminder.Visible = true
+        end
+
+        task.wait(1)
+    end
+end)
 task.spawn(function()
     while gui.Parent do
         if not Enabled then
@@ -1267,3 +1438,4 @@ Player.CharacterRemoving:Connect(function()
         updateInterface()
     end
 end)
+
