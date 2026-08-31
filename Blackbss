@@ -1,99 +1,93 @@
--- BSS 1:1 Auto Farm Template
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+
+local Window = OrionLib:MakeWindow({
+    Name = "BSS 1:1 Auto Farm Hub",
+    HidePremium = false,
+    SaveConfig = true,
+    ConfigFolder = "BSS11_Hub"
+})
+
+local MainTab = Window:MakeTab({
+    Name = "Main Farm",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local _G.AutoFarm = false
+local _G.AutoCollect = false
 local player = game.Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 local virtualUser = game:GetService("VirtualUser")
 
--- [ TÙY CHỈNH TỌA ĐỘ VÀ ĐƯỜNG DẪN ] --
--- Bạn cần thay đổi các thông số này cho khớp với game BSS 1:1
-local fieldCFrame = CFrame.new(10, 50, 10) -- Tọa độ của cánh đồng bạn muốn farm
-local hiveCFrame = CFrame.new(-50, 50, -50) -- Tọa độ tổ ong để quay về đổi mật
-local tokenFolder = workspace -- Đổi thành đường dẫn chứa token của game (VD: workspace.Collectibles)
-
--- [ CÁC BIẾN BẬT/TẮT ] --
-local _G.AutoFarm = true
-local _G.AutoCollect = true
-local _G.AutoConvert = true
-
--- Chống AFK (Tránh bị kick khỏi server khi treo máy)
 player.Idled:Connect(function()
     virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
     task.wait(1)
     virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- Hàm Dịch chuyển tức thời
-local function teleport(cframe)
-    if character and character:FindFirstChild("HumanoidRootPart") then
-        character.HumanoidRootPart.CFrame = cframe
-    end
-end
+MainTab:AddToggle({
+    Name = "Bật Auto Farm (Tự động vung vợt)",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoFarm = Value
+    end    
+})
 
--- 1. Chức năng Auto Farm (Tự động vung công cụ)
+MainTab:AddToggle({
+    Name = "Bật Auto Nhặt Token",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoCollect = Value
+    end    
+})
+
+MainTab:AddButton({
+    Name = "Dịch chuyển về Tổ (Đổi mật)",
+    Callback = function()
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 10, 0)
+            OrionLib:MakeNotification({
+                Name = "Thành công",
+                Content = "Đã dịch chuyển về tổ!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
 task.spawn(function()
     while task.wait(0.1) do
         if _G.AutoFarm then
-            local tool = character:FindFirstChildOfClass("Tool")
-            if tool then
-                tool:Activate() -- Mô phỏng thao tác click chuột để farm
-            else
-                -- Nếu chưa cầm tool trên tay, tự động trang bị từ Balo
-                local backpackTool = player.Backpack:FindFirstChildOfClass("Tool")
-                if backpackTool then
-                    backpackTool.Parent = character
+            local character = player.Character
+            if character then
+                local tool = character:FindFirstChildOfClass("Tool")
+                if tool then
+                    tool:Activate()
+                else
+                    local backpackTool = player.Backpack:FindFirstChildOfClass("Tool")
+                    if backpackTool then
+                        backpackTool.Parent = character
+                    end
                 end
             end
         end
     end
 end)
 
--- 2. Chức năng Auto Collect Tokens (Nhặt kỹ năng/Vật phẩm)
 task.spawn(function()
     while task.wait(0.2) do
         if _G.AutoCollect then
-            -- Quét các part trong thư mục Token
-            for _, item in pairs(tokenFolder:GetChildren()) do
-                -- Điều kiện kiểm tra xem có phải token không (Cần chỉnh lại ClassName hoặc Tên tùy game)
-                if item:IsA("Part") and item.Name == "Token" then 
-                    -- Phương pháp 1: Bay đến token để nhặt
-                    teleport(item.CFrame)
-                    task.wait(0.05)
-                    
-                    -- Phương pháp 2: Nếu game dùng RemoteEvent để nhặt (Tối ưu hơn)
-                    -- game:GetService("ReplicatedStorage").Events.CollectToken:FireServer(item)
+            local character = player.Character
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    if obj:IsA("Part") and (obj.Name:lower():match("token") or obj.Name:lower():match("drop")) then
+                        character.HumanoidRootPart.CFrame = obj.CFrame
+                        task.wait(0.1)
+                    end
                 end
-            end
-            -- Sau khi nhặt xong, quay lại vị trí farm
-            if _G.AutoFarm and not _G.ĐangDoiMat then
-                teleport(fieldCFrame)
             end
         end
     end
 end)
 
--- 3. Chức năng Auto Convert (Tự động về tổ đổi mật khi đầy túi)
-task.spawn(function()
-    while task.wait(1) do
-        if _G.AutoConvert then
-            -- Bạn cần tìm đường dẫn đến UI hiển thị túi phấn hoa của game BSS 1:1
-            -- Ví dụ giả định: player.PlayerGui.Main.Bag.Text = "100/100"
-            local bagGained = 100 -- Thay bằng logic lấy dung lượng thực tế
-            local bagMax = 100    -- Thay bằng logic lấy dung lượng tối đa
-            
-            if bagGained >= bagMax then
-                _G.ĐangDoiMat = true
-                print("Túi đầy! Đang quay về tổ đổi mật...")
-                
-                teleport(hiveCFrame)
-                task.wait(1)
-                
-                -- Kích hoạt sự kiện đổi mật (Cần tìm RemoteEvent cụ thể của game)
-                -- Ví dụ: game:GetService("ReplicatedStorage").Events.MakeHoney:FireServer()
-                
-                task.wait(5) -- Chờ thời gian đổi mật hoàn tất
-                _G.ĐangDoiMat = false
-                teleport(fieldCFrame) -- Quay lại đồng farm
-            end
-        end
-    end
-end)
+OrionLib:Init()
