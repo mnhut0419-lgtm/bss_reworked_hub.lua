@@ -8,30 +8,32 @@ player.Idled:Connect(function()
     virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- [ TẠO GIAO DIỆN GỐC ]
+-- [ TẠO GIAO DIỆN GỐC (NATIVE GUI) ]
 local ScreenGui = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
 local Title = Instance.new("TextLabel")
 local FarmBtn = Instance.new("TextButton")
 local CollectBtn = Instance.new("TextButton")
+local SaveHiveBtn = Instance.new("TextButton")
 local HiveBtn = Instance.new("TextButton")
 local CloseBtn = Instance.new("TextButton")
 
 local success, result = pcall(function() return game:GetService("CoreGui") end)
 ScreenGui.Parent = success and result or player:WaitForChild("PlayerGui")
-ScreenGui.Name = "DeltaBSSAutoFarmV3"
+ScreenGui.Name = "DeltaBSSAutoFarmV4"
 
+-- Khung menu (Đã mở rộng để thêm nút)
 Frame.Parent = ScreenGui
 Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Frame.Position = UDim2.new(0.5, -100, 0.3, 0)
-Frame.Size = UDim2.new(0, 200, 0, 230)
+Frame.Position = UDim2.new(0.5, -100, 0.2, 0)
+Frame.Size = UDim2.new(0, 200, 0, 275)
 Frame.Active = true
 Frame.Draggable = true 
 
 Title.Parent = Frame
 Title.Size = UDim2.new(1, 0, 0, 40)
-Title.Text = "BSS 1:1 AUTO V3"
-Title.TextColor3 = Color3.fromRGB(0, 255, 150)
+Title.Text = "BSS 1:1 AUTO V4"
+Title.TextColor3 = Color3.fromRGB(0, 200, 255)
 Title.BackgroundTransparency = 1
 Title.Font = Enum.Font.SourceSansBold
 Title.TextSize = 22
@@ -48,13 +50,16 @@ local function createButton(btn, yPos, text)
 end
 
 createButton(FarmBtn, 45, "Auto Farm: TẮT")
-createButton(CollectBtn, 90, "Auto Nhặt: TẮT")
-createButton(HiveBtn, 135, "Về Tổ Đổi Mật")
-createButton(CloseBtn, 180, "Tắt Menu (Đóng)")
+createButton(CollectBtn, 90, "Nhặt Gần Đây: TẮT")
+createButton(SaveHiveBtn, 135, "Lưu Vị Trí Tổ")
+createButton(HiveBtn, 180, "Về Tổ Đổi Mật")
+createButton(CloseBtn, 225, "Tắt Menu (Đóng)")
 CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 
+-- [ CÁC BIẾN HOẠT ĐỘNG ]
 local autoFarm = false
 local autoCollect = false
+local myHiveCFrame = nil -- Biến lưu vị trí tổ
 
 FarmBtn.MouseButton1Click:Connect(function()
     autoFarm = not autoFarm
@@ -64,13 +69,32 @@ end)
 
 CollectBtn.MouseButton1Click:Connect(function()
     autoCollect = not autoCollect
-    CollectBtn.Text = autoCollect and "Auto Nhặt: BẬT" or "Auto Nhặt: TẮT"
+    CollectBtn.Text = autoCollect and "Nhặt Gần Đây: BẬT" or "Nhặt Gần Đây: TẮT"
     CollectBtn.BackgroundColor3 = autoCollect and Color3.fromRGB(50, 180, 50) or Color3.fromRGB(60, 60, 60)
 end)
 
-HiveBtn.MouseButton1Click:Connect(function()
+-- Nút Lưu Tổ (Người chơi đứng ở tổ và bấm để lưu)
+SaveHiveBtn.MouseButton1Click:Connect(function()
     if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 10, 0)
+        myHiveCFrame = player.Character.HumanoidRootPart.CFrame
+        SaveHiveBtn.Text = "Đã Lưu Tổ!"
+        SaveHiveBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 50)
+        task.wait(1)
+        SaveHiveBtn.Text = "Lưu Vị Trí Tổ"
+        SaveHiveBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+end)
+
+-- Nút Về Tổ (Dịch chuyển đến vị trí đã lưu)
+HiveBtn.MouseButton1Click:Connect(function()
+    if not myHiveCFrame then
+        HiveBtn.Text = "Chưa lưu tổ!"
+        task.wait(1)
+        HiveBtn.Text = "Về Tổ Đổi Mật"
+        return
+    end
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        player.Character.HumanoidRootPart.CFrame = myHiveCFrame
     end
 end)
 
@@ -80,68 +104,55 @@ CloseBtn.MouseButton1Click:Connect(function()
     autoCollect = false
 end)
 
--- [ LOGIC AUTO FARM (Click ngầm - Không chiếm cảm ứng) ]
+-- [ LOGIC AUTO FARM ]
 task.spawn(function()
     while task.wait(0.1) do
         if autoFarm then
             local character = player.Character
-            if character and character:FindFirstChild("HumanoidRootPart") then
-                
-                -- Tự động lấy tool từ túi đồ ra tay
+            if character and character:FindFirstChild("Humanoid") then
                 local tool = character:FindFirstChildOfClass("Tool")
+                
+                -- Ép nhân vật cầm gậy đúng cách
                 if not tool then
                     local backpackTool = player.Backpack:FindFirstChildOfClass("Tool")
                     if backpackTool then 
-                        backpackTool.Parent = character 
+                        character.Humanoid:EquipTool(backpackTool)
                         task.wait(0.1)
                         tool = backpackTool
                     end
                 end
                 
+                -- Vung gậy
                 if tool then
-                    -- Phương pháp 1: Lệnh kích hoạt chuẩn của Roblox
                     tool:Activate()
-                    
-                    -- Phương pháp 2: Hack tín hiệu RemoteEvent (Bypass click)
-                    -- Vì game là BSS 1:1, nó thường dùng chung bộ mã gốc của bản chính.
-                    pcall(function()
-                        local rs = game:GetService("ReplicatedStorage")
-                        
-                        -- Gửi tín hiệu thu thập mật y hệt như bản BSS gốc
-                        local bssEvents = rs:FindFirstChild("Events")
-                        if bssEvents and bssEvents:FindFirstChild("PlayerActives") and bssEvents.PlayerActives:FindFirstChild("Collect") then
-                            bssEvents.PlayerActives.Collect:FireServer({
-                                ["Dir"] = character.HumanoidRootPart.CFrame.LookVector,
-                                ["Pos"] = character.HumanoidRootPart.Position
-                            })
-                        end
-                        
-                        -- Dự phòng cho các game fanmade tự tạo event click riêng
-                        if rs:FindFirstChild("Click") then rs.Click:FireServer() end
-                        if rs:FindFirstChild("ClickEvent") then rs.ClickEvent:FireServer() end
-                    end)
+                    -- Gửi tín hiệu click chuột an toàn
+                    virtualUser:CaptureController()
+                    virtualUser:ClickButton1(Vector2.new(0,0))
                 end
             end
         end
     end
 end)
 
--- [ LOGIC AUTO NHẶT ]
+-- [ LOGIC AUTO NHẶT (CHỈ QUÉT BÁN KÍNH 60 MÉT) ]
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait(0.15) do
         if autoCollect then
             local character = player.Character
             if character and character:FindFirstChild("HumanoidRootPart") then
                 local rootPart = character.HumanoidRootPart
+                local currentPos = rootPart.Position
                 
-                local folders = {"Collectibles", "Tokens", "Drops"}
-                for _, folderName in pairs(folders) do
-                    local folder = workspace:FindFirstChild(folderName)
-                    if folder then
-                        for _, token in pairs(folder:GetDescendants()) do
-                            if token:IsA("Part") or token:IsA("MeshPart") then
-                                rootPart.CFrame = token.CFrame
-                                task.wait(0.05)
+                -- Quét toàn bộ part nhưng chỉ lấy những cái ở gần (bán kính 60)
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    if obj:IsA("Part") or obj:IsA("MeshPart") then
+                        if obj.Name:lower():match("token") or obj.Name:lower():match("drop") or obj.Name == "C" then
+                            -- Tính khoảng cách từ nhân vật đến Token
+                            local distance = (obj.Position - currentPos).Magnitude
+                            
+                            if distance <= 60 then -- Chỉ nhặt nếu token ở cách dưới 60 mét (cùng một vườn)
+                                rootPart.CFrame = obj.CFrame
+                                task.wait(0.05) -- Đợi nhặt xong mới bay tới cái tiếp theo
                             end
                         end
                     end
