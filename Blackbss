@@ -2,123 +2,129 @@ local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local rootPart = character:WaitForChild("HumanoidRootPart")
 local humanoid = character:WaitForChild("Humanoid")
-
-local CONFIG = {
-    TotemNames = {"Totem", "Pollen", "Honey", "Token", "Collect"},
-    SearchRadius = 120,
-    MoveSpeed = 16,
-    LoopDelay = 0.3,
-}
-
+local TweenService = game:GetService("TweenService")
+local CONFIG = {TotemKeywords = {"totem","token","pollen","honey","collect"},SearchRadius=150,MoveSpeed=20,LoopDelay=0.3,AutoCollect=true,AutoRebirth=false,AutoQuest=false}
+local function createMenu()
+local screenGui=Instance.new("ScreenGui")
+screenGui.Name="BSSCAutoMenu"
+screenGui.ResetOnSpawn=false
+screenGui.Parent=player:WaitForChild("PlayerGui")
+local frame=Instance.new("Frame")
+frame.Size=UDim2.new(0,220,0,280)
+frame.Position=UDim2.new(0,10,0,10)
+frame.BackgroundColor3=Color3.fromRGB(25,25,35)
+frame.BackgroundTransparency=0.15
+frame.BorderSizePixel=0
+frame.Parent=screenGui
+local title=Instance.new("TextLabel")
+title.Size=UDim2.new(1,0,0,35)
+title.Text="🐝 BSS 1:1 AUTO"
+title.TextColor3=Color3.fromRGB(255,255,255)
+title.BackgroundTransparency=1
+title.Font=Enum.Font.GothamBold
+title.TextSize=18
+title.Parent=frame
+local function makeToggle(text,default,callback,yPos)
+local btn=Instance.new("TextButton")
+btn.Size=UDim2.new(1,-20,0,30)
+btn.Position=UDim2.new(0,10,0,yPos)
+btn.BackgroundColor3=Color3.fromRGB(40,40,55)
+btn.TextColor3=Color3.fromRGB(200,200,200)
+btn.Font=Enum.Font.Gotham
+btn.TextSize=14
+btn.Parent=frame
+local state=default
+btn.Text=text..(state and" [ON]"or" [OFF]")
+btn.MouseButton1Click:Connect(function()
+state=not state
+btn.Text=text..(state and" [ON]"or" [OFF]")
+callback(state)
+end)
+return btn
+end
+makeToggle("Auto Collect",CONFIG.AutoCollect,function(v)CONFIG.AutoCollect=v end,45)
+makeToggle("Auto Rebirth",CONFIG.AutoRebirth,function(v)CONFIG.AutoRebirth=v end,80)
+makeToggle("Auto Quest",CONFIG.AutoQuest,function(v)CONFIG.AutoQuest=v end,115)
+local status=Instance.new("TextLabel")
+status.Size=UDim2.new(1,-20,0,40)
+status.Position=UDim2.new(0,10,0,160)
+status.Text="Đang chờ..."
+status.TextColor3=Color3.fromRGB(150,150,150)
+status.BackgroundTransparency=1
+status.Font=Enum.Font.Gotham
+status.TextSize=12
+status.TextWrapped=true
+status.Parent=frame
+return status
+end
+local statusLabel=createMenu()
 local function getRemote()
-    local remote = nil
-    local possibleNames = {"Collect", "CollectTotem", "Gather", "Claim", "RemoteEvent", "GameEvent"}
-    for _, name in ipairs(possibleNames) do
-        remote = game:GetService("ReplicatedStorage"):FindFirstChild(name)
-        if remote then break end
-        remote = workspace:FindFirstChild(name)
-        if remote then break end
-    end
-    return remote
+for _,n in ipairs({"Collect","CollectTotem","Gather","Claim","RemoteEvent","GameEvent"})do
+local r=game:GetService("ReplicatedStorage"):FindFirstChild(n)or workspace:FindFirstChild(n)
+if r then return r end
 end
-
+end
 local function findNearestTotem()
-    local nearest = nil
-    local minDist = CONFIG.SearchRadius
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") or obj:IsA("Model") then
-            local name = obj.Name
-            for _, keyword in ipairs(CONFIG.TotemNames) do
-                if string.find(name:lower(), keyword:lower()) then
-                    local pos
-                    if obj:IsA("Model") and obj.PrimaryPart then
-                        pos = obj.PrimaryPart.Position
-                    elseif obj:IsA("BasePart") then
-                        pos = obj.Position
-                    end
-                    if pos then
-                        local dist = (pos - rootPart.Position).Magnitude
-                        if dist < minDist then
-                            minDist = dist
-                            nearest = {Object = obj, Position = pos, Distance = dist}
-                        end
-                    end
-                    break
-                end
-            end
-        end
-    end
-    return nearest
+local nearest,minDist=nil,CONFIG.SearchRadius
+for _,obj in ipairs(workspace:GetDescendants())do
+if obj:IsA("BasePart")or obj:IsA("Model")then
+local name=obj.Name:lower()
+for _,kw in ipairs(CONFIG.TotemKeywords)do
+if name:find(kw)then
+local pos=obj:IsA("Model")and obj.PrimaryPart and obj.PrimaryPart.Position or obj.Position
+if pos then
+local dist=(pos-rootPart.Position).Magnitude
+if dist<minDist then minDist=dist nearest={Object=obj,Position=pos,Distance=dist}end
 end
-
-local function interactWithTotem(totemData)
-    local obj = totemData.Object
-    local success = false
-
-    local click = obj:FindFirstChild("ClickDetector")
-    if click then
-        click:Click()
-        success = true
-    end
-
-    local remote = getRemote()
-    if remote then
-        pcall(function()
-            remote:FireServer(obj)
-            success = true
-        end)
-        if not success then
-            pcall(function()
-                remote:FireServer(obj.Name, obj.Position)
-                success = true
-            end)
-        end
-        if not success then
-            pcall(function()
-                remote:FireServer("Collect", obj)
-                success = true
-            end)
-        end
-    end
-
-    local tool = player.Backpack:FindFirstChild("Collector") or player.Character:FindFirstChild("Collector")
-    if tool then
-        pcall(function()
-            tool:Activate()
-            success = true
-        end)
-    end
-
-    return success
+break
 end
-
-print("[BSS Auto] Da khoi dong (mobile)")
-
+end
+end
+end
+return nearest
+end
+local function interactTotem(totemData)
+local obj=totemData.Object
+local remote=getRemote()
+local success=false
+if remote then
+pcall(function()remote:FireServer(obj)success=true end)
+if not success then pcall(function()remote:FireServer(obj.Name,obj.Position)success=true end)end
+if not success then pcall(function()remote:FireServer("Collect",obj)success=true end)end
+end
+local click=obj:FindFirstChild("ClickDetector")
+if click and not success then click:Click()success=true end
+return success
+end
+local function moveToPosition(pos)
+local tween=TweenService:Create(rootPart,TweenInfo.new((pos-rootPart.Position).Magnitude/CONFIG.MoveSpeed,Enum.EasingStyle.Linear,Enum.EasingDirection.Out),{CFrame=CFrame.new(pos)})
+tween:Play()
+return tween
+end
 while true do
-    pcall(function()
-        local nearest = findNearestTotem()
-        if nearest then
-            local pos = nearest.Position
-            local dist = nearest.Distance
-
-            if dist > 5 then
-                humanoid:MoveTo(pos)
-                wait(math.min(dist / CONFIG.MoveSpeed, 2))
-            end
-
-            if dist < 8 then
-                local ok = interactWithTotem(nearest)
-                if ok then
-                    print("[BSS Auto] Da nhat: " .. nearest.Object.Name)
-                else
-                    print("[BSS Auto] Khong the nhat " .. nearest.Object.Name .. " – thu cach khac")
-                end
-                wait(0.5)
-            end
-        else
-            rootPart.CFrame = rootPart.CFrame * CFrame.Angles(0, math.rad(5), 0)
-            wait(1)
-        end
-    end)
-    wait(CONFIG.LoopDelay)
+pcall(function()
+if CONFIG.AutoCollect then
+local nearest=findNearestTotem()
+if nearest then
+statusLabel.Text="📦 Đang tới: "..nearest.Object.Name
+local dist=nearest.Distance
+if dist>3 then moveToPosition(nearest.Position)wait(math.min(dist/CONFIG.MoveSpeed,2.5))end
+if dist<6 then
+local ok=interactTotem(nearest)
+if ok then statusLabel.Text="✅ Đã nhặt: "..nearest.Object.Name wait(0.3)else statusLabel.Text="⚠️ Không nhặt được "..nearest.Object.Name end
+end
+else
+statusLabel.Text="🔍 Đang tìm totem..."
+rootPart.CFrame=rootPart.CFrame*CFrame.Angles(0,math.rad(3),0)
+wait(0.5)
+end
+end
+if CONFIG.AutoRebirth then
+for _,gui in ipairs(player.PlayerGui:GetChildren())do
+local btn=gui:FindFirstChild("RebirthButton")or gui:FindFirstChild("Rebirth")
+if btn and btn:IsA("TextButton")then btn:Click()wait(1)break end
+end
+end
+end)
+wait(CONFIG.LoopDelay)
 end
