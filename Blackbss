@@ -1,191 +1,124 @@
--- ===== SCRIPT AUTO BSS 1:1 – CÓ MENU & TỰ ĐỘNG NHẶT TOTEM =====
--- LƯU Ý: Bạn cần thay tên RemoteEvent, từ khóa totem cho đúng game.
--- Chạy bằng executor (Delta, Xeno, etc.) – RỦI RO KHÓA TK.
-
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local rootPart = character:WaitForChild("HumanoidRootPart")
 local humanoid = character:WaitForChild("Humanoid")
 
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-
--- ===== CẤU HÌNH =====
 local CONFIG = {
-    TotemKeywords = {"totem", "token", "pollen", "honey", "collect"}, -- từ khóa nhận diện totem
-    CollectRange = 100,          -- bán kính tìm totem
-    MoveSpeed = 30,              -- tốc độ di chuyển
-    LoopInterval = 0.5,          -- chu kỳ loop
-    AutoRebirth = false,
-    AutoCollect = true,
-    AutoQuest = false,
+    TotemNames = {"Totem", "Pollen", "Honey", "Token", "Collect"},
+    SearchRadius = 120,
+    MoveSpeed = 16,
+    LoopDelay = 0.3,
 }
 
--- ===== TẠO MENU GUI =====
-local function createMenu()
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "BSSAutoMenu"
-    screenGui.ResetOnSpawn = false
-    screenGui.Parent = player.PlayerGui
-
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 250, 0, 300)
-    frame.Position = UDim2.new(0, 10, 0, 10)
-    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-    frame.BackgroundTransparency = 0.2
-    frame.BorderSizePixel = 0
-    frame.Parent = screenGui
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 30)
-    title.Text = "🐝 BSS 1:1 AUTO"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 18
-    title.Parent = frame
-
-    local function makeToggle(text, default, callback, yOffset)
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, -20, 0, 30)
-        btn.Position = UDim2.new(0, 10, 0, yOffset)
-        btn.Text = text .. " [OFF]"
-        btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-        btn.Font = Enum.Font.Gotham
-        btn.TextSize = 14
-        btn.Parent = frame
-
-        local state = default
-        btn.MouseButton1Click:Connect(function()
-            state = not state
-            btn.Text = text .. (state and " [ON]" or " [OFF]")
-            callback(state)
-        end)
-        return btn
+local function getRemote()
+    local remote = nil
+    local possibleNames = {"Collect", "CollectTotem", "Gather", "Claim", "RemoteEvent", "GameEvent"}
+    for _, name in ipairs(possibleNames) do
+        remote = game:GetService("ReplicatedStorage"):FindFirstChild(name)
+        if remote then break end
+        remote = workspace:FindFirstChild(name)
+        if remote then break end
     end
-
-    local y = 40
-    makeToggle("Auto Collect Totem", CONFIG.AutoCollect, function(v) CONFIG.AutoCollect = v end, y); y = y + 35
-    makeToggle("Auto Rebirth", CONFIG.AutoRebirth, function(v) CONFIG.AutoRebirth = v end, y); y = y + 35
-    makeToggle("Auto Quest", CONFIG.AutoQuest, function(v) CONFIG.AutoQuest = v end, y); y = y + 35
-
-    -- hiển thị trạng thái totem gần nhất
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, -20, 0, 40)
-    statusLabel.Position = UDim2.new(0, 10, 0, y+10)
-    statusLabel.Text = "Đợi..."
-    statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Font = Enum.Font.Gotham
-    statusLabel.TextSize = 12
-    statusLabel.TextWrapped = true
-    statusLabel.Parent = frame
-
-    return statusLabel
+    return remote
 end
 
-local statusLabel = createMenu()
-
--- ===== HÀM TÌM TOTEM GẦN NHẤT =====
 local function findNearestTotem()
     local nearest = nil
-    local minDist = CONFIG.CollectRange
+    local minDist = CONFIG.SearchRadius
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("BasePart") or obj:IsA("Model") then
-            local name = obj.Name:lower()
-            local isTotem = false
-            for _, kw in ipairs(CONFIG.TotemKeywords) do
-                if name:find(kw) then
-                    isTotem = true
+            local name = obj.Name
+            for _, keyword in ipairs(CONFIG.TotemNames) do
+                if string.find(name:lower(), keyword:lower()) then
+                    local pos
+                    if obj:IsA("Model") and obj.PrimaryPart then
+                        pos = obj.PrimaryPart.Position
+                    elseif obj:IsA("BasePart") then
+                        pos = obj.Position
+                    end
+                    if pos then
+                        local dist = (pos - rootPart.Position).Magnitude
+                        if dist < minDist then
+                            minDist = dist
+                            nearest = {Object = obj, Position = pos, Distance = dist}
+                        end
+                    end
                     break
                 end
             end
-            if isTotem then
-                local pos = obj:IsA("Model") and obj.PrimaryPart and obj.PrimaryPart.Position or obj.Position
-                if pos then
-                    local dist = (pos - rootPart.Position).Magnitude
-                    if dist < minDist then
-                        minDist = dist
-                        nearest = obj
-                    end
-                end
-            end
         end
     end
-    return nearest, minDist
+    return nearest
 end
 
--- ===== HÀM DI CHUYỂN MƯỢT MÀ ĐẾN VỊ TRÍ =====
-local function moveTo(position)
-    if not position then return end
-    local tweenInfo = TweenInfo.new(
-        (position - rootPart.Position).Magnitude / CONFIG.MoveSpeed,
-        Enum.EasingStyle.Linear,
-        Enum.EasingDirection.Out
-    )
-    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = CFrame.new(position)})
-    tween:Play()
-    return tween
-end
+local function interactWithTotem(totemData)
+    local obj = totemData.Object
+    local success = false
 
--- ===== HÀM TƯƠNG TÁC VỚI TOTEM =====
-local function interactWithTotem(totem)
-    if not totem then return end
-    -- Thử ClickDetector
-    local clickDetector = totem:FindFirstChild("ClickDetector")
-    if clickDetector then
-        clickDetector:Click()
-        return true
+    local click = obj:FindFirstChild("ClickDetector")
+    if click then
+        click:Click()
+        success = true
     end
-    -- Thử RemoteEvent (cần tìm tên đúng)
-    local remote = game:GetService("ReplicatedStorage"):FindFirstChild("CollectTotem") 
-                   or game:GetService("ReplicatedStorage"):FindFirstChild("RemoteEvent")
+
+    local remote = getRemote()
     if remote then
-        remote:FireServer(totem)
-        return true
+        pcall(function()
+            remote:FireServer(obj)
+            success = true
+        end)
+        if not success then
+            pcall(function()
+                remote:FireServer(obj.Name, obj.Position)
+                success = true
+            end)
+        end
+        if not success then
+            pcall(function()
+                remote:FireServer("Collect", obj)
+                success = true
+            end)
+        end
     end
-    -- Nếu là Model, có thể cần nhặt bằng cách gần đó
-    return false
+
+    local tool = player.Backpack:FindFirstChild("Collector") or player.Character:FindFirstChild("Collector")
+    if tool then
+        pcall(function()
+            tool:Activate()
+            success = true
+        end)
+    end
+
+    return success
 end
 
--- ===== VÒNG LẶP CHÍNH =====
+print("[BSS Auto] Da khoi dong (mobile)")
+
 while true do
     pcall(function()
-        if CONFIG.AutoCollect then
-            local totem, dist = findNearestTotem()
-            if totem then
-                local targetPos = totem:IsA("Model") and totem.PrimaryPart.Position or totem.Position
-                if targetPos and dist > 3 then
-                    statusLabel.Text = "📦 Di chuyển đến " .. totem.Name
-                    moveTo(targetPos)
-                    wait((dist / CONFIG.MoveSpeed) + 0.2) -- chờ tới gần
-                end
-                -- Khi đã gần, tương tác
-                if dist and dist < 5 then
-                    if interactWithTotem(totem) then
-                        statusLabel.Text = "✅ Nhặt: " .. totem.Name
-                    else
-                        statusLabel.Text = "⚠️ Không thể nhặt " .. totem.Name
-                    end
-                    wait(0.3)
-                end
-            else
-                statusLabel.Text = "🔍 Không tìm thấy totem"
-            end
-        end
+        local nearest = findNearestTotem()
+        if nearest then
+            local pos = nearest.Position
+            local dist = nearest.Distance
 
-        -- Auto Rebirth (giữ nguyên từ script cũ)
-        if CONFIG.AutoRebirth then
-            -- Tìm nút Rebirth trong GUI
-            for _, gui in ipairs(player.PlayerGui:GetChildren()) do
-                local btn = gui:FindFirstChild("RebirthButton") or gui:FindFirstChild("Rebirth")
-                if btn and btn:IsA("TextButton") then
-                    btn:Click()
-                    wait(2)
-                end
+            if dist > 5 then
+                humanoid:MoveTo(pos)
+                wait(math.min(dist / CONFIG.MoveSpeed, 2))
             end
+
+            if dist < 8 then
+                local ok = interactWithTotem(nearest)
+                if ok then
+                    print("[BSS Auto] Da nhat: " .. nearest.Object.Name)
+                else
+                    print("[BSS Auto] Khong the nhat " .. nearest.Object.Name .. " – thu cach khac")
+                end
+                wait(0.5)
+            end
+        else
+            rootPart.CFrame = rootPart.CFrame * CFrame.Angles(0, math.rad(5), 0)
+            wait(1)
         end
     end)
-    wait(CONFIG.LoopInterval)
+    wait(CONFIG.LoopDelay)
 end
