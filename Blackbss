@@ -3,112 +3,110 @@ local character = player.Character or player.CharacterAdded:Wait()
 local rootPart = character:WaitForChild("HumanoidRootPart")
 local humanoid = character:WaitForChild("Humanoid")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local CONFIG = {
-    AutoFarm = true,
     AutoCollect = true,
-    AutoRebirth = false,
-    AutoQuest = false,
-    AutoConvert = false,
-    CollectRadius = 150,
+    CollectRadius = 200,
     MoveSpeed = 20,
     LoopDelay = 0.3,
 }
 
-local menuFrame = nil
-local statusLabel = nil
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "BSSAutoMenu"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
 
-local function createMenu()
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "AtlasBSS11"
-    screenGui.ResetOnSpawn = false
-    screenGui.Parent = player:WaitForChild("PlayerGui")
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 220, 0, 200)
+mainFrame.Position = UDim2.new(0, 10, 0, 10)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+mainFrame.BackgroundTransparency = 0.15
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+mainFrame.Visible = true
 
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 250, 0, 350)
-    frame.Position = UDim2.new(0, 10, 0, 10)
-    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-    frame.BackgroundTransparency = 0.15
-    frame.BorderSizePixel = 0
-    frame.Parent = screenGui
-    menuFrame = frame
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 30, 0, 30)
+toggleBtn.Position = UDim2.new(1, -35, 0, 5)
+toggleBtn.Text = "−"
+toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(50,50,60)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 18
+toggleBtn.Parent = mainFrame
 
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 40)
-    title.Text = "🐝 ATLAS BSS 1:1"
-    title.TextColor3 = Color3.fromRGB(255, 200, 50)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 20
-    title.Parent = frame
+local reopenBtn = Instance.new("TextButton")
+reopenBtn.Size = UDim2.new(0, 50, 0, 50)
+reopenBtn.Position = UDim2.new(0, 10, 0, 10)
+reopenBtn.Text = "🐝"
+reopenBtn.TextColor3 = Color3.fromRGB(255,200,50)
+reopenBtn.BackgroundColor3 = Color3.fromRGB(25,25,35)
+reopenBtn.BackgroundTransparency = 0.2
+reopenBtn.Font = Enum.Font.GothamBold
+reopenBtn.TextSize = 24
+reopenBtn.Parent = screenGui
+reopenBtn.Visible = false
 
-    local function makeToggle(text, default, callback, yPos)
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, -20, 0, 32)
-        btn.Position = UDim2.new(0, 10, 0, yPos)
-        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-        btn.TextColor3 = Color3.fromRGB(220, 220, 220)
-        btn.Font = Enum.Font.Gotham
-        btn.TextSize = 14
-        btn.Parent = frame
-        local state = default
-        btn.Text = text .. (state and " [ON]" or " [OFF]")
-        btn.MouseButton1Click:Connect(function()
-            state = not state
-            btn.Text = text .. (state and " [ON]" or " [OFF]")
-            callback(state)
-        end)
-        return btn
+local function toggleMenu(show)
+    if show then
+        mainFrame.Visible = true
+        reopenBtn.Visible = false
+        toggleBtn.Text = "−"
+    else
+        mainFrame.Visible = false
+        reopenBtn.Visible = true
+        toggleBtn.Text = "+"
     end
-
-    makeToggle("Auto Farm", CONFIG.AutoFarm, function(v) CONFIG.AutoFarm = v end, 50)
-    makeToggle("Auto Collect", CONFIG.AutoCollect, function(v) CONFIG.AutoCollect = v end, 90)
-    makeToggle("Auto Rebirth", CONFIG.AutoRebirth, function(v) CONFIG.AutoRebirth = v end, 130)
-    makeToggle("Auto Quest", CONFIG.AutoQuest, function(v) CONFIG.AutoQuest = v end, 170)
-    makeToggle("Auto Convert", CONFIG.AutoConvert, function(v) CONFIG.AutoConvert = v end, 210)
-
-    local status = Instance.new("TextLabel")
-    status.Size = UDim2.new(1, -20, 0, 50)
-    status.Position = UDim2.new(0, 10, 0, 255)
-    status.Text = "🟢 Đang chạy..."
-    status.TextColor3 = Color3.fromRGB(150, 150, 150)
-    status.BackgroundTransparency = 1
-    status.Font = Enum.Font.Gotham
-    status.TextSize = 12
-    status.TextWrapped = true
-    status.Parent = frame
-    statusLabel = status
-
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 30, 0, 30)
-    closeBtn.Position = UDim2.new(1, -35, 0, 5)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 16
-    closeBtn.Parent = frame
-    closeBtn.MouseButton1Click:Connect(function()
-        menuFrame.Visible = not menuFrame.Visible
-    end)
-
-    return status
 end
 
-createMenu()
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.M or input.KeyCode == Enum.KeyCode.Insert then
-        if menuFrame then
-            menuFrame.Visible = not menuFrame.Visible
-        end
-    end
+toggleBtn.MouseButton1Click:Connect(function()
+    toggleMenu(not mainFrame.Visible)
 end)
+
+reopenBtn.MouseButton1Click:Connect(function()
+    toggleMenu(true)
+end)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 35)
+title.Text = "🐝 BSS 1:1 AUTO"
+title.TextColor3 = Color3.fromRGB(255, 200, 50)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.Parent = mainFrame
+
+local function makeToggle(text, default, callback, yPos)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -20, 0, 30)
+    btn.Position = UDim2.new(0, 10, 0, yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    btn.TextColor3 = Color3.fromRGB(220, 220, 220)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    btn.Parent = mainFrame
+    local state = default
+    btn.Text = text .. (state and " [ON]" or " [OFF]")
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.Text = text .. (state and " [ON]" or " [OFF]")
+        callback(state)
+    end)
+    return btn
+end
+
+makeToggle("Auto Collect", CONFIG.AutoCollect, function(v) CONFIG.AutoCollect = v end, 45)
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 50)
+statusLabel.Position = UDim2.new(0, 10, 0, 90)
+statusLabel.Text = "🟢 Đang chạy..."
+statusLabel.TextColor3 = Color3.fromRGB(150,150,150)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+statusLabel.TextWrapped = true
+statusLabel.Parent = mainFrame
 
 local function getRemote()
     local remoteNames = {"RemoteEvent", "GameEvent", "Collect", "CollectTotem", "Gather", "Claim", "BSSRemote"}
@@ -121,43 +119,35 @@ local function getRemote()
     return nil
 end
 
-local function findCollectibles()
+local function findAllCollectibles()
     local items = {}
-    local keywords = {"pollen", "honey", "token", "collect", "totem", "flower", "nectar"}
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("BasePart") or obj:IsA("Model") then
-            local name = obj.Name:lower()
-            for _, kw in ipairs(keywords) do
-                if name:find(kw) then
-                    local pos
-                    if obj:IsA("Model") and obj.PrimaryPart then
-                        pos = obj.PrimaryPart.Position
-                    elseif obj:IsA("BasePart") then
-                        pos = obj.Position
+            local pos
+            if obj:IsA("Model") and obj.PrimaryPart then
+                pos = obj.PrimaryPart.Position
+            elseif obj:IsA("BasePart") then
+                pos = obj.Position
+            end
+            if pos then
+                local dist = (pos - rootPart.Position).Magnitude
+                if dist < CONFIG.CollectRadius then
+                    local hasClick = obj:FindFirstChild("ClickDetector") ~= nil
+                    local name = obj.Name:lower()
+                    local keywords = {"pollen","honey","token","totem","flower","nectar","collect","drop","item"}
+                    local match = false
+                    for _, kw in ipairs(keywords) do
+                        if name:find(kw) then match = true break end
                     end
-                    if pos then
-                        local dist = (pos - rootPart.Position).Magnitude
-                        if dist < CONFIG.CollectRadius then
-                            table.insert(items, {Object = obj, Position = pos, Distance = dist})
-                        end
+                    if hasClick or match then
+                        table.insert(items, {Object = obj, Position = pos, Distance = dist})
                     end
-                    break
                 end
             end
         end
     end
-    table.sort(items, function(a, b) return a.Distance < b.Distance end)
+    table.sort(items, function(a,b) return a.Distance < b.Distance end)
     return items
-end
-
-local function findRebirthButton()
-    for _, gui in ipairs(player.PlayerGui:GetChildren()) do
-        local btn = gui:FindFirstChild("RebirthButton") or gui:FindFirstChild("Rebirth") or gui:FindFirstChild("Reset")
-        if btn and btn:IsA("TextButton") then
-            return btn
-        end
-    end
-    return nil
 end
 
 local function interactWithObject(obj)
@@ -186,8 +176,10 @@ local function interactWithObject(obj)
     if not success then
         local click = obj:FindFirstChild("ClickDetector")
         if click then
-            click:Click()
-            success = true
+            pcall(function()
+                click:Click()
+                success = true
+            end)
         end
     end
 
@@ -201,10 +193,9 @@ local function interactWithObject(obj)
         end
     end
 
-    if not success then
-        local args = {obj}
+    if not success and remote then
         pcall(function()
-            game:GetService("ReplicatedStorage"):FindFirstChild("RemoteEvent"):FireServer(unpack(args))
+            remote:FireServer("Collect", obj.Name)
             success = true
         end)
     end
@@ -214,29 +205,20 @@ end
 
 local function moveToPosition(pos)
     if not pos then return end
-    local distance = (pos - rootPart.Position).Magnitude
-    if distance < 2 then return end
-    local tweenInfo = TweenInfo.new(
-        distance / CONFIG.MoveSpeed,
-        Enum.EasingStyle.Linear,
-        Enum.EasingDirection.Out
-    )
+    local dist = (pos - rootPart.Position).Magnitude
+    if dist < 2 then return end
+    local tweenInfo = TweenInfo.new(dist / CONFIG.MoveSpeed, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
     local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = CFrame.new(pos)})
     tween:Play()
     return tween
 end
 
 local lastCollectTime = 0
-local lastRebirthTime = 0
-local lastQuestTime = 0
-local lastConvertTime = 0
 
 while true do
     pcall(function()
-        local currentTime = tick()
-
-        if CONFIG.AutoFarm or CONFIG.AutoCollect then
-            local items = findCollectibles()
+        if CONFIG.AutoCollect then
+            local items = findAllCollectibles()
             if #items > 0 then
                 local target = items[1]
                 statusLabel.Text = "📦 Đang tới: " .. target.Object.Name
@@ -245,11 +227,11 @@ while true do
                     moveToPosition(target.Position)
                     wait(math.min(dist / CONFIG.MoveSpeed, 2.5))
                 end
-                if dist < 8 and (currentTime - lastCollectTime) > 0.5 then
+                if dist < 8 and (tick() - lastCollectTime) > 0.3 then
                     local ok = interactWithObject(target.Object)
                     if ok then
                         statusLabel.Text = "✅ Đã nhặt: " .. target.Object.Name
-                        lastCollectTime = currentTime
+                        lastCollectTime = tick()
                         wait(0.2)
                     else
                         statusLabel.Text = "⚠️ Không thể nhặt " .. target.Object.Name
@@ -260,67 +242,6 @@ while true do
                 statusLabel.Text = "🔍 Đang tìm vật phẩm..."
                 rootPart.CFrame = rootPart.CFrame * CFrame.Angles(0, math.rad(3), 0)
                 wait(0.5)
-            end
-        end
-
-        if CONFIG.AutoRebirth and (currentTime - lastRebirthTime) > 3 then
-            local btn = findRebirthButton()
-            if btn then
-                btn:Click()
-                statusLabel.Text = "🔄 Đã Rebirth!"
-                lastRebirthTime = currentTime
-                wait(1)
-            else
-                local remote = getRemote()
-                if remote then
-                    pcall(function()
-                        remote:FireServer("Rebirth")
-                        statusLabel.Text = "🔄 Đã Rebirth!"
-                        lastRebirthTime = currentTime
-                        wait(1)
-                    end)
-                end
-            end
-        end
-
-        if CONFIG.AutoQuest and (currentTime - lastQuestTime) > 5 then
-            for _, obj in ipairs(workspace:GetDescendants()) do
-                if obj:IsA("Model") and (obj.Name:lower():find("quest") or obj.Name:lower():find("npc") or obj.Name:lower():find("bear")) then
-                    local pos = obj.PrimaryPart and obj.PrimaryPart.Position
-                    if pos then
-                        moveToPosition(pos)
-                        wait(1)
-                        local remote = getRemote()
-                        if remote then
-                            pcall(function()
-                                remote:FireServer("Quest", "Accept")
-                                remote:FireServer("Quest", "Complete")
-                                statusLabel.Text = "📋 Đã làm quest"
-                                lastQuestTime = currentTime
-                            end)
-                        end
-                    end
-                    break
-                end
-            end
-        end
-
-        if CONFIG.AutoConvert and (currentTime - lastConvertTime) > 10 then
-            local hive = workspace:FindFirstChild("Hive") or workspace:FindFirstChild("BeeHive")
-            if hive then
-                local pos = hive.PrimaryPart and hive.PrimaryPart.Position or hive.Position
-                if pos then
-                    moveToPosition(pos)
-                    wait(1.5)
-                    local remote = getRemote()
-                    if remote then
-                        pcall(function()
-                            remote:FireServer("Convert")
-                            statusLabel.Text = "🍯 Đang convert..."
-                            lastConvertTime = currentTime
-                        end)
-                    end
-                end
             end
         end
     end)
