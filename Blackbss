@@ -1,93 +1,152 @@
-local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
-
-local Window = OrionLib:MakeWindow({
-    Name = "BSS 1:1 Auto Farm Hub",
-    HidePremium = false,
-    SaveConfig = true,
-    ConfigFolder = "BSS11_Hub"
-})
-
-local MainTab = Window:MakeTab({
-    Name = "Main Farm",
-    Icon = "rbxassetid://4483345998",
-    PremiumOnly = false
-})
-
-local _G.AutoFarm = false
-local _G.AutoCollect = false
 local player = game.Players.LocalPlayer
 local virtualUser = game:GetService("VirtualUser")
 
+-- [ CHỐNG AFK ]
 player.Idled:Connect(function()
     virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
     task.wait(1)
     virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
-MainTab:AddToggle({
-    Name = "Bật Auto Farm (Tự động vung vợt)",
-    Default = false,
-    Callback = function(Value)
-        _G.AutoFarm = Value
-    end    
-})
+-- [ TẠO GIAO DIỆN GỐC ]
+local ScreenGui = Instance.new("ScreenGui")
+local Frame = Instance.new("Frame")
+local Title = Instance.new("TextLabel")
+local FarmBtn = Instance.new("TextButton")
+local CollectBtn = Instance.new("TextButton")
+local HiveBtn = Instance.new("TextButton")
+local CloseBtn = Instance.new("TextButton")
 
-MainTab:AddToggle({
-    Name = "Bật Auto Nhặt Token",
-    Default = false,
-    Callback = function(Value)
-        _G.AutoCollect = Value
-    end    
-})
+local success, result = pcall(function() return game:GetService("CoreGui") end)
+ScreenGui.Parent = success and result or player:WaitForChild("PlayerGui")
+ScreenGui.Name = "DeltaBSSAutoFarmV3"
 
-MainTab:AddButton({
-    Name = "Dịch chuyển về Tổ (Đổi mật)",
-    Callback = function()
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 10, 0)
-            OrionLib:MakeNotification({
-                Name = "Thành công",
-                Content = "Đã dịch chuyển về tổ!",
-                Image = "rbxassetid://4483345998",
-                Time = 3
-            })
-        end
-    end    
-})
+Frame.Parent = ScreenGui
+Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Frame.Position = UDim2.new(0.5, -100, 0.3, 0)
+Frame.Size = UDim2.new(0, 200, 0, 230)
+Frame.Active = true
+Frame.Draggable = true 
 
+Title.Parent = Frame
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.Text = "BSS 1:1 AUTO V3"
+Title.TextColor3 = Color3.fromRGB(0, 255, 150)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 22
+
+local function createButton(btn, yPos, text)
+    btn.Parent = Frame
+    btn.Size = UDim2.new(0.9, 0, 0, 40)
+    btn.Position = UDim2.new(0.05, 0, 0, yPos)
+    btn.Text = text
+    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 16
+end
+
+createButton(FarmBtn, 45, "Auto Farm: TẮT")
+createButton(CollectBtn, 90, "Auto Nhặt: TẮT")
+createButton(HiveBtn, 135, "Về Tổ Đổi Mật")
+createButton(CloseBtn, 180, "Tắt Menu (Đóng)")
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+
+local autoFarm = false
+local autoCollect = false
+
+FarmBtn.MouseButton1Click:Connect(function()
+    autoFarm = not autoFarm
+    FarmBtn.Text = autoFarm and "Auto Farm: BẬT" or "Auto Farm: TẮT"
+    FarmBtn.BackgroundColor3 = autoFarm and Color3.fromRGB(50, 180, 50) or Color3.fromRGB(60, 60, 60)
+end)
+
+CollectBtn.MouseButton1Click:Connect(function()
+    autoCollect = not autoCollect
+    CollectBtn.Text = autoCollect and "Auto Nhặt: BẬT" or "Auto Nhặt: TẮT"
+    CollectBtn.BackgroundColor3 = autoCollect and Color3.fromRGB(50, 180, 50) or Color3.fromRGB(60, 60, 60)
+end)
+
+HiveBtn.MouseButton1Click:Connect(function()
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 10, 0)
+    end
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+    autoFarm = false
+    autoCollect = false
+end)
+
+-- [ LOGIC AUTO FARM (Click ngầm - Không chiếm cảm ứng) ]
 task.spawn(function()
     while task.wait(0.1) do
-        if _G.AutoFarm then
-            local character = player.Character
-            if character then
-                local tool = character:FindFirstChildOfClass("Tool")
-                if tool then
-                    tool:Activate()
-                else
-                    local backpackTool = player.Backpack:FindFirstChildOfClass("Tool")
-                    if backpackTool then
-                        backpackTool.Parent = character
-                    end
-                end
-            end
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(0.2) do
-        if _G.AutoCollect then
+        if autoFarm then
             local character = player.Character
             if character and character:FindFirstChild("HumanoidRootPart") then
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    if obj:IsA("Part") and (obj.Name:lower():match("token") or obj.Name:lower():match("drop")) then
-                        character.HumanoidRootPart.CFrame = obj.CFrame
+                
+                -- Tự động lấy tool từ túi đồ ra tay
+                local tool = character:FindFirstChildOfClass("Tool")
+                if not tool then
+                    local backpackTool = player.Backpack:FindFirstChildOfClass("Tool")
+                    if backpackTool then 
+                        backpackTool.Parent = character 
                         task.wait(0.1)
+                        tool = backpackTool
                     end
+                end
+                
+                if tool then
+                    -- Phương pháp 1: Lệnh kích hoạt chuẩn của Roblox
+                    tool:Activate()
+                    
+                    -- Phương pháp 2: Hack tín hiệu RemoteEvent (Bypass click)
+                    -- Vì game là BSS 1:1, nó thường dùng chung bộ mã gốc của bản chính.
+                    pcall(function()
+                        local rs = game:GetService("ReplicatedStorage")
+                        
+                        -- Gửi tín hiệu thu thập mật y hệt như bản BSS gốc
+                        local bssEvents = rs:FindFirstChild("Events")
+                        if bssEvents and bssEvents:FindFirstChild("PlayerActives") and bssEvents.PlayerActives:FindFirstChild("Collect") then
+                            bssEvents.PlayerActives.Collect:FireServer({
+                                ["Dir"] = character.HumanoidRootPart.CFrame.LookVector,
+                                ["Pos"] = character.HumanoidRootPart.Position
+                            })
+                        end
+                        
+                        -- Dự phòng cho các game fanmade tự tạo event click riêng
+                        if rs:FindFirstChild("Click") then rs.Click:FireServer() end
+                        if rs:FindFirstChild("ClickEvent") then rs.ClickEvent:FireServer() end
+                    end)
                 end
             end
         end
     end
 end)
 
-OrionLib:Init()
+-- [ LOGIC AUTO NHẶT ]
+task.spawn(function()
+    while task.wait(0.1) do
+        if autoCollect then
+            local character = player.Character
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                local rootPart = character.HumanoidRootPart
+                
+                local folders = {"Collectibles", "Tokens", "Drops"}
+                for _, folderName in pairs(folders) do
+                    local folder = workspace:FindFirstChild(folderName)
+                    if folder then
+                        for _, token in pairs(folder:GetDescendants()) do
+                            if token:IsA("Part") or token:IsA("MeshPart") then
+                                rootPart.CFrame = token.CFrame
+                                task.wait(0.05)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
