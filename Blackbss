@@ -1,45 +1,58 @@
 --==============================================================
--- AUTHORIZED GARDEN COLLECTOR V2
--- Đi bộ liên tục, không teleport/noclip/anti-AFK/RemoteEvent
+-- GARDEN COLLECTOR V4
+-- Vung 4 goc + di chuyen lien tuc + dieu chinh toc do
+-- Chi dung API Luau/Roblox tieu chuan.
 --==============================================================
 
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
+local UserInputService = game:GetService("UserInputService")
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local Config = {
-    FieldRadius = 85,
-    ScanRadius = 110,
+    -- Toc do tuy chinh. Server van co quyen ghi de neu game khong cho phep.
+    CustomSpeedEnabled = true,
+    SelectedWalkSpeed = 70,
+    MinimumWalkSpeed = 20,
+    MaximumWalkSpeed = 250,
+    WalkSpeedStep = 5,
+    SpeedEnforceInterval = 0.20,
 
-    -- Khoảng cách được tính là đã chạm vật phẩm
-    ReachDistance = 5,
+    -- Bo dieu khien tu thich nghi voi WalkSpeed hien tai.
+    UpdateInterval = 0.02,
+    MinimumPassThroughDistance = 4,
+    MaximumPassThroughDistance = 18,
+    PassThroughTime = 0.14,
+    MinimumReachDistance = 2.5,
+    MaximumReachDistance = 4.5,
+    MoveTimeoutBuffer = 1.5,
+    MaximumMoveTimeout = 8,
 
-    -- Nhân vật tiếp tục đi xuyên qua mục tiêu để không bị khựng
-    PassThroughDistance = 4,
-
-    -- Chu kỳ cập nhật chuyển động
-    UpdateInterval = 0.05,
-
-    MoveTimeout = 7,
-
-    -- Không chọn lại Totem vừa chạm trong thời gian này
+    ReturnTimeout = 14,
+    ReturnDistance = 5,
     VisitedCooldown = 12,
     FailedCooldown = 6,
-
     PatrolMoveTime = 4,
     PatrolSwitchDistance = 6,
+    MaximumPatrolSwitchDistance = 18,
+    PatrolLookAheadTime = 0.13,
+    PatrolEdgeMargin = 4,
+
+    PlayerBoundaryTolerance = 1,
+    TargetBoundaryTolerance = 0.2,
+    MinimumCornerSpacing = 4,
+    MinimumZoneArea = 30,
+    ShowZonePreview = true,
 
     CollectibleTag = "Collectible",
-
     AttributeNames = {
         "Collectible",
         "Pickup",
         "Token",
         "Totem",
     },
-
     NameKeywords = {
         "token",
         "totem",
@@ -52,109 +65,22 @@ local Config = {
 }
 
 local Enabled = false
-local FieldCenter = nil
 local CurrentTarget = nil
+
+local SavedCorners = {}
+local ZonePoints = {}
+local ZoneCenter = nil
+local ZoneValid = false
 
 local Tracked = setmetatable({}, { __mode = "k" })
 local BlockedUntil = setmetatable({}, { __mode = "k" })
 
---==============================================================
--- NHẬN DIỆN VẬT PHẨM
---==============================================================
-
-local function containsKeyword(name)
-    name = string.lower(name)
-
-    for _, keyword in ipairs(Config.NameKeywords) do
-        if string.find(name, keyword, 1, true) then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function hasCollectibleMarker(instance)
-    if CollectionService:HasTag(instance, Config.CollectibleTag) then
-        return true
-    end
-
-    for _, attributeName in ipairs(Config.AttributeNames) do
-        if instance:GetAttribute(attributeName) == true then
-            return true
-        end
-    end
-
-    return containsKeyword(instance.Name)
-end
-
-local function resolveCollectible(part)
-    -- Ưu tiên Model để tránh một Totem có nhiều Part
-    local ancestor = part.Parent
-
-    for _ = 1, 3 do
-        if not ancestor or ancestor == workspace then
-            break
-        end
-
-        if hasCollectibleMarker(ancestor) then
-            if ancestor:IsA("Model") then
-                return ancestor
-            end
-
-            return part
-        end
-
-        ancestor = ancestor.Parent
-    end
-
-    if hasCollectibleMarker(part) then
-        return part
-    end
-
-    return nil
-end
-
-local function registerInstance(instance)
-    if instance:IsA("BasePart") then
-        local collectible = resolveCollectible(instance)
-
-        if collectible then
-            Tracked[collectible] = true
-        end
-    elseif instance:IsA("Model") and hasCollectibleMarker(instance) then
-        Tracked[instance] = true
-    end
-end
-
-workspace.DescendantAdded:Connect(registerInstance)
-
-workspace.DescendantRemoving:Connect(function(instance)
-    Tracked[instance] = nil
-    BlockedUntil[instance] = nil
-
-    if CurrentTarget == instance then
-        CurrentTarget = nil
-    end
-end)
-
-CollectionService
-    :GetInstanceAddedSignal(Config.CollectibleTag)
-    :Connect(registerInstance)
-
--- Chỉ quét toàn bộ Workspace một lần
-task.spawn(function()
-    for index, instance in ipairs(workspace:GetDescendants()) do
-        registerInstance(instance)
-
-        if index % 800 == 0 then
-            task.wait()
-        end
-    end
-end)
+local SpeedHumanoid = nil
+local OriginalWalkSpeed = nil
+local LastSpeedEnforce = 0
 
 --==============================================================
--- NHÂN VẬT VÀ MỤC TIÊU
+-- NHAN VAT VA TOC DO
 --==============================================================
 
 local function getCharacter()
@@ -173,65 +99,446 @@ local function getCharacter()
     return character, humanoid, root
 end
 
+local function captureOriginalSpeed(humanoid)
+    if SpeedHumanoid ~= humanoid then
+        SpeedHumanoid = humanoid
+        OriginalWalkSpeed = humanoid.WalkSpeed
+    elseif OriginalWalkSpeed == nil then
+        OriginalWalkSpeed = humanoid.WalkSpeed
+    end
+end
+
+local function applyCustomSpeed(humanoid, force)
+    if not Config.CustomSpeedEnabled or not humanoid then
+        return
+    end
+
+    captureOriginalSpeed(humanoid)
+
+    local now = os.clock()
+    if force or now - LastSpeedEnforce >= Config.SpeedEnforceInterval then
+        LastSpeedEnforce = now
+
+        if math.abs(humanoid.WalkSpeed - Config.SelectedWalkSpeed) > 0.01 then
+            humanoid.WalkSpeed = Config.SelectedWalkSpeed
+        end
+    end
+end
+
+local function restoreOriginalSpeed()
+    if SpeedHumanoid
+        and SpeedHumanoid.Parent
+        and OriginalWalkSpeed ~= nil
+    then
+        SpeedHumanoid.WalkSpeed = OriginalWalkSpeed
+    end
+
+    SpeedHumanoid = nil
+    OriginalWalkSpeed = nil
+    LastSpeedEnforce = 0
+end
+
+local function horizontalDistance(first, second)
+    local difference = first - second
+    return Vector2.new(difference.X, difference.Z).Magnitude
+end
+
+local function getAdaptiveMovement(humanoid)
+    local speed = math.max(humanoid.WalkSpeed, 1)
+
+    local passThroughDistance = math.clamp(
+        speed * Config.PassThroughTime,
+        Config.MinimumPassThroughDistance,
+        Config.MaximumPassThroughDistance
+    )
+
+    local reachDistance = math.clamp(
+        Config.MinimumReachDistance + speed * 0.012,
+        Config.MinimumReachDistance,
+        Config.MaximumReachDistance
+    )
+
+    local patrolSwitchDistance = math.clamp(
+        speed * Config.PatrolLookAheadTime,
+        Config.PatrolSwitchDistance,
+        Config.MaximumPatrolSwitchDistance
+    )
+
+    return speed, passThroughDistance, reachDistance, patrolSwitchDistance
+end
+
+local function distanceFromPointToSegment(point, segmentStart, segmentEnd)
+    local segment = segmentEnd - segmentStart
+    local lengthSquared = segment:Dot(segment)
+
+    if lengthSquared <= 0.001 then
+        return (point - segmentStart).Magnitude
+    end
+
+    local progress = math.clamp(
+        (point - segmentStart):Dot(segment) / lengthSquared,
+        0,
+        1
+    )
+
+    local nearestPoint = segmentStart + segment * progress
+    return (point - nearestPoint).Magnitude
+end
+
+--==============================================================
+-- HINH HOC KHU VUC 4 GOC
+--==============================================================
+
+local function calculateCenter(points)
+    local total = Vector3.new(0, 0, 0)
+    for _, point in ipairs(points) do
+        total += point
+    end
+    return total / #points
+end
+
+local function sortCorners(points)
+    local center = calculateCenter(points)
+    local sorted = {}
+
+    for _, point in ipairs(points) do
+        table.insert(sorted, point)
+    end
+
+    table.sort(sorted, function(first, second)
+        local firstAngle = math.atan2(first.Z - center.Z, first.X - center.X)
+        local secondAngle = math.atan2(second.Z - center.Z, second.X - center.X)
+        return firstAngle < secondAngle
+    end)
+
+    return sorted, center
+end
+
+local function calculatePolygonArea(points)
+    local area = 0
+
+    for index = 1, #points do
+        local nextIndex = index % #points + 1
+        local current = points[index]
+        local nextPoint = points[nextIndex]
+        area += current.X * nextPoint.Z - nextPoint.X * current.Z
+    end
+
+    return math.abs(area) * 0.5
+end
+
+local function distanceToSegmentXZ(point, segmentStart, segmentEnd)
+    local directionX = segmentEnd.X - segmentStart.X
+    local directionZ = segmentEnd.Z - segmentStart.Z
+    local lengthSquared = directionX * directionX + directionZ * directionZ
+
+    if lengthSquared <= 0.001 then
+        return horizontalDistance(point, segmentStart)
+    end
+
+    local progress = (
+        (point.X - segmentStart.X) * directionX
+        + (point.Z - segmentStart.Z) * directionZ
+    ) / lengthSquared
+
+    progress = math.clamp(progress, 0, 1)
+
+    local nearestX = segmentStart.X + directionX * progress
+    local nearestZ = segmentStart.Z + directionZ * progress
+    local differenceX = point.X - nearestX
+    local differenceZ = point.Z - nearestZ
+
+    return math.sqrt(differenceX * differenceX + differenceZ * differenceZ)
+end
+
+local function distanceToZoneBoundary(position)
+    if #ZonePoints < 3 then
+        return 0
+    end
+
+    local minimumDistance = math.huge
+
+    for index = 1, #ZonePoints do
+        local nextIndex = index % #ZonePoints + 1
+        minimumDistance = math.min(
+            minimumDistance,
+            distanceToSegmentXZ(position, ZonePoints[index], ZonePoints[nextIndex])
+        )
+    end
+
+    return minimumDistance
+end
+
+local function isInsideZone(position, tolerance)
+    if #ZonePoints < 3 then
+        return false
+    end
+
+    tolerance = tolerance or 0
+
+    if tolerance > 0 and distanceToZoneBoundary(position) <= tolerance then
+        return true
+    end
+
+    local inside = false
+    local previousIndex = #ZonePoints
+
+    for index = 1, #ZonePoints do
+        local current = ZonePoints[index]
+        local previous = ZonePoints[previousIndex]
+        local crossesZ = (current.Z > position.Z) ~= (previous.Z > position.Z)
+
+        if crossesZ then
+            local intersectionX = (previous.X - current.X)
+                * (position.Z - current.Z)
+                / (previous.Z - current.Z)
+                + current.X
+
+            if position.X < intersectionX then
+                inside = not inside
+            end
+        end
+
+        previousIndex = index
+    end
+
+    return inside
+end
+
+local function rebuildZone()
+    ZoneValid = false
+    ZoneCenter = nil
+    table.clear(ZonePoints)
+
+    if #SavedCorners ~= 4 then
+        return false
+    end
+
+    local sortedPoints, center = sortCorners(SavedCorners)
+    for _, point in ipairs(sortedPoints) do
+        table.insert(ZonePoints, point)
+    end
+
+    if calculatePolygonArea(ZonePoints) < Config.MinimumZoneArea then
+        return false
+    end
+
+    ZoneCenter = center
+    ZoneValid = true
+    return true
+end
+
+--==============================================================
+-- HIEN THI KHU VUC
+--==============================================================
+
+local oldPreview = workspace:FindFirstChild("GardenZonePreview_Local")
+if oldPreview then
+    oldPreview:Destroy()
+end
+
+local PreviewFolder = Instance.new("Folder")
+PreviewFolder.Name = "GardenZonePreview_Local"
+PreviewFolder.Parent = workspace
+
+local function createMarker(position, text, color)
+    local marker = Instance.new("Part")
+    marker.Name = "ZoneMarker"
+    marker.Shape = Enum.PartType.Ball
+    marker.Size = Vector3.new(1.2, 1.2, 1.2)
+    marker.Position = position + Vector3.new(0, 1.5, 0)
+    marker.Color = color
+    marker.Material = Enum.Material.Neon
+    marker.Anchored = true
+    marker.CanCollide = false
+    marker.CanTouch = false
+    marker.CanQuery = false
+    marker.Parent = PreviewFolder
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Size = UDim2.fromOffset(70, 28)
+    billboard.StudsOffset = Vector3.new(0, 1.4, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = marker
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = color
+    label.TextStrokeTransparency = 0.25
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 14
+    label.Parent = billboard
+end
+
+local function createBoundaryLine(first, second, color)
+    local raisedFirst = first + Vector3.new(0, 0.7, 0)
+    local raisedSecond = second + Vector3.new(0, 0.7, 0)
+    local difference = raisedSecond - raisedFirst
+
+    if difference.Magnitude <= 0.1 then
+        return
+    end
+
+    local line = Instance.new("Part")
+    line.Name = "ZoneBoundary"
+    line.Size = Vector3.new(0.18, 0.18, difference.Magnitude)
+    line.CFrame = CFrame.lookAt((raisedFirst + raisedSecond) / 2, raisedSecond)
+    line.Color = color
+    line.Material = Enum.Material.Neon
+    line.Transparency = 0.2
+    line.Anchored = true
+    line.CanCollide = false
+    line.CanTouch = false
+    line.CanQuery = false
+    line.Parent = PreviewFolder
+end
+
+local function refreshZonePreview()
+    PreviewFolder:ClearAllChildren()
+
+    if not Config.ShowZonePreview then
+        return
+    end
+
+    for index, position in ipairs(SavedCorners) do
+        createMarker(position, "Goc " .. index, Color3.fromRGB(255, 210, 50))
+    end
+
+    if ZoneValid then
+        for index = 1, #ZonePoints do
+            local nextIndex = index % #ZonePoints + 1
+            createBoundaryLine(
+                ZonePoints[index],
+                ZonePoints[nextIndex],
+                Color3.fromRGB(255, 205, 50)
+            )
+        end
+
+        createMarker(ZoneCenter, "Trung tam", Color3.fromRGB(70, 255, 135))
+    end
+end
+
+--==============================================================
+-- CACHE VAT PHAM
+--==============================================================
+
+local function containsKeyword(name)
+    name = string.lower(name)
+    for _, keyword in ipairs(Config.NameKeywords) do
+        if string.find(name, keyword, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function hasCollectibleMarker(instance)
+    if CollectionService:HasTag(instance, Config.CollectibleTag) then
+        return true
+    end
+
+    for _, attributeName in ipairs(Config.AttributeNames) do
+        if instance:GetAttribute(attributeName) == true then
+            return true
+        end
+    end
+
+    return containsKeyword(instance.Name)
+end
+
+local function resolveCollectible(part)
+    local ancestor = part.Parent
+
+    for _ = 1, 3 do
+        if not ancestor or ancestor == workspace then
+            break
+        end
+
+        if hasCollectibleMarker(ancestor) then
+            if ancestor:IsA("Model") then
+                return ancestor
+            end
+            return part
+        end
+
+        ancestor = ancestor.Parent
+    end
+
+    if hasCollectibleMarker(part) then
+        return part
+    end
+
+    return nil
+end
+
+local function registerInstance(instance)
+    if instance:IsA("BasePart") then
+        local collectible = resolveCollectible(instance)
+        if collectible then
+            Tracked[collectible] = true
+        end
+    elseif instance:IsA("Model") and hasCollectibleMarker(instance) then
+        Tracked[instance] = true
+    end
+end
+
+workspace.DescendantAdded:Connect(registerInstance)
+
+workspace.DescendantRemoving:Connect(function(instance)
+    Tracked[instance] = nil
+    BlockedUntil[instance] = nil
+    if CurrentTarget == instance then
+        CurrentTarget = nil
+    end
+end)
+
+CollectionService:GetInstanceAddedSignal(Config.CollectibleTag):Connect(registerInstance)
+
+task.spawn(function()
+    for index, instance in ipairs(workspace:GetDescendants()) do
+        registerInstance(instance)
+        if index % 800 == 0 then
+            task.wait()
+        end
+    end
+end)
+
 local function getTargetPosition(target)
     if target:IsA("BasePart") then
         return target.Position
     end
 
     if target:IsA("Model") then
-        local part = target.PrimaryPart
-            or target:FindFirstChildWhichIsA("BasePart", true)
-
-        if part then
-            return part.Position
-        end
+        local part = target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart", true)
+        return part and part.Position or nil
     end
 
     return nil
 end
 
-local function horizontalDistance(firstPosition, secondPosition)
-    local difference = firstPosition - secondPosition
-
-    return Vector2.new(
-        difference.X,
-        difference.Z
-    ).Magnitude
-end
-
 local function getClosestTarget(rootPosition)
-    if not FieldCenter then
+    if not ZoneValid then
         return nil
     end
 
     local closestTarget = nil
-    local closestDistance = Config.ScanRadius
+    local closestDistance = math.huge
     local currentTime = os.clock()
 
     for target in pairs(Tracked) do
         if not target:IsDescendantOf(workspace) then
             Tracked[target] = nil
             BlockedUntil[target] = nil
-        else
-            local blockTime = BlockedUntil[target]
+        elseif not BlockedUntil[target] or BlockedUntil[target] <= currentTime then
+            local position = getTargetPosition(target)
 
-            if not blockTime or blockTime <= currentTime then
-                local position = getTargetPosition(target)
-
-                if position
-                    and horizontalDistance(
-                        position,
-                        FieldCenter
-                    ) <= Config.FieldRadius
-                then
-                    local distance = (
-                        position - rootPosition
-                    ).Magnitude
-
-                    if distance < closestDistance then
-                        closestDistance = distance
-                        closestTarget = target
-                    end
+            if position and isInsideZone(position, Config.TargetBoundaryTolerance) then
+                local distance = (position - rootPosition).Magnitude
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closestTarget = target
                 end
             end
         end
@@ -244,12 +551,9 @@ local function blockTarget(target, duration)
     local untilTime = os.clock() + duration
     BlockedUntil[target] = untilTime
 
-    -- Nếu mục tiêu là Model, chặn luôn các Part đã được cache
     if target:IsA("Model") then
         for otherTarget in pairs(Tracked) do
-            if otherTarget ~= target
-                and otherTarget:IsDescendantOf(target)
-            then
+            if otherTarget ~= target and otherTarget:IsDescendantOf(target) then
                 BlockedUntil[otherTarget] = untilTime
             end
         end
@@ -257,50 +561,126 @@ local function blockTarget(target, duration)
 end
 
 --==============================================================
--- DI CHUYỂN LIÊN TỤC
+-- DI CHUYEN
 --==============================================================
 
+local function getGroundPosition(position, character)
+    local parameters = RaycastParams.new()
+    parameters.FilterType = Enum.RaycastFilterType.Exclude
+    parameters.FilterDescendantsInstances = { character, PreviewFolder }
+
+    local result = workspace:Raycast(
+        position + Vector3.new(0, 70, 0),
+        Vector3.new(0, -160, 0),
+        parameters
+    )
+
+    return result and (result.Position + Vector3.new(0, 2, 0)) or position
+end
+
 local function walkThroughTarget(target, humanoid, root)
-    local deadline = os.clock() + Config.MoveTimeout
+    local initialPosition = getTargetPosition(target)
+    if not initialPosition then
+        return false
+    end
+
+    applyCustomSpeed(humanoid, true)
+
+    local initialSpeed = math.max(humanoid.WalkSpeed, 1)
+    local initialDistance = (initialPosition - root.Position).Magnitude
+    local deadline = os.clock() + math.clamp(
+        initialDistance / initialSpeed + Config.MoveTimeoutBuffer,
+        1.5,
+        Config.MaximumMoveTimeout
+    )
+
     local previousGoal = nil
+    local previousRootPosition = root.Position
 
     while Enabled and os.clock() < deadline do
+        applyCustomSpeed(humanoid, false)
+
         if humanoid.Health <= 0 then
             return false
         end
 
-        -- Token đã biến mất: server đã nhận lần chạm
+        if not isInsideZone(root.Position, Config.PlayerBoundaryTolerance) then
+            return false
+        end
+
         if not target:IsDescendantOf(workspace) then
             return true
         end
 
         local targetPosition = getTargetPosition(target)
-
-        if not targetPosition then
+        if not targetPosition
+            or not isInsideZone(targetPosition, Config.TargetBoundaryTolerance)
+        then
             return false
         end
 
+        local speed, passThroughDistance, reachDistance = getAdaptiveMovement(humanoid)
         local difference = targetPosition - root.Position
         local distance = difference.Magnitude
+        local movementGoal = targetPosition
 
-        -- Không dừng và không chờ tại mục tiêu
-        if distance <= Config.ReachDistance then
+        if distance > 0.01 then
+            local possibleGoal = targetPosition + difference.Unit * passThroughDistance
+            if isInsideZone(possibleGoal, 0) then
+                movementGoal = possibleGoal
+            end
+        end
+
+        if not previousGoal or (movementGoal - previousGoal).Magnitude >= 0.75 then
+            humanoid:MoveTo(movementGoal)
+            previousGoal = movementGoal
+        end
+
+        local sweptDistance = distanceFromPointToSegment(
+            targetPosition,
+            previousRootPosition,
+            root.Position
+        )
+
+        if distance <= reachDistance or sweptDistance <= reachDistance then
             return true
         end
 
-        local movementGoal = targetPosition
+        previousRootPosition = root.Position
 
-        -- Đi quá vị trí mục tiêu một đoạn để nhân vật không giảm tốc
-        if distance > 0.01 then
-            movementGoal = targetPosition
-                + difference.Unit * Config.PassThroughDistance
+        local remainingDistance = (targetPosition - root.Position).Magnitude
+        local requiredTime = remainingDistance / math.max(speed, 1)
+        deadline = math.max(
+            deadline,
+            os.clock() + math.min(requiredTime + 0.5, Config.MaximumMoveTimeout)
+        )
+
+        task.wait(Config.UpdateInterval)
+    end
+
+    return false
+end
+
+local function returnToZoneCenter(character, humanoid, root)
+    if not ZoneCenter then
+        return false
+    end
+
+    applyCustomSpeed(humanoid, true)
+
+    local centerGoal = getGroundPosition(ZoneCenter, character)
+    humanoid:MoveTo(centerGoal)
+    local deadline = os.clock() + Config.ReturnTimeout
+
+    while Enabled and os.clock() < deadline do
+        applyCustomSpeed(humanoid, false)
+
+        if humanoid.Health <= 0 then
+            return false
         end
 
-        if not previousGoal
-            or (movementGoal - previousGoal).Magnitude >= 1
-        then
-            humanoid:MoveTo(movementGoal)
-            previousGoal = movementGoal
+        if horizontalDistance(root.Position, centerGoal) <= Config.ReturnDistance then
+            return true
         end
 
         task.wait(Config.UpdateInterval)
@@ -310,46 +690,39 @@ local function walkThroughTarget(target, humanoid, root)
 end
 
 local function getRandomPatrolPoint(character)
-    local angle = math.random() * math.pi * 2
-    local radius = math.sqrt(math.random())
-        * Config.FieldRadius
-        * 0.85
+    local minimumX, maximumX = math.huge, -math.huge
+    local minimumZ, maximumZ = math.huge, -math.huge
 
-    local flatPosition = FieldCenter + Vector3.new(
-        math.cos(angle) * radius,
-        0,
-        math.sin(angle) * radius
-    )
-
-    local raycastParameters = RaycastParams.new()
-    raycastParameters.FilterType = Enum.RaycastFilterType.Exclude
-    raycastParameters.FilterDescendantsInstances = { character }
-
-    local result = workspace:Raycast(
-        flatPosition + Vector3.new(0, 60, 0),
-        Vector3.new(0, -140, 0),
-        raycastParameters
-    )
-
-    if result then
-        return result.Position + Vector3.new(0, 2, 0)
+    for _, point in ipairs(ZonePoints) do
+        minimumX = math.min(minimumX, point.X)
+        maximumX = math.max(maximumX, point.X)
+        minimumZ = math.min(minimumZ, point.Z)
+        maximumZ = math.max(maximumZ, point.Z)
     end
 
-    return Vector3.new(
-        flatPosition.X,
-        FieldCenter.Y,
-        flatPosition.Z
-    )
+    for _ = 1, 50 do
+        local candidate = Vector3.new(
+            minimumX + math.random() * (maximumX - minimumX),
+            ZoneCenter.Y,
+            minimumZ + math.random() * (maximumZ - minimumZ)
+        )
+
+        if isInsideZone(candidate, 0)
+            and distanceToZoneBoundary(candidate) >= Config.PatrolEdgeMargin
+        then
+            return getGroundPosition(candidate, character)
+        end
+    end
+
+    return getGroundPosition(ZoneCenter, character)
 end
-
 --==============================================================
--- GIAO DIỆN
+-- GIAO DIEN
 --==============================================================
 
-local previousGui = PlayerGui:FindFirstChild("GardenCollectorUI")
-
-if previousGui then
-    previousGui:Destroy()
+local oldGui = PlayerGui:FindFirstChild("GardenCollectorUI")
+if oldGui then
+    oldGui:Destroy()
 end
 
 local gui = Instance.new("ScreenGui")
@@ -359,8 +732,8 @@ gui.Parent = PlayerGui
 
 local frame = Instance.new("Frame")
 frame.AnchorPoint = Vector2.new(0.5, 0)
-frame.Position = UDim2.new(0.5, 0, 0, 35)
-frame.Size = UDim2.fromOffset(280, 135)
+frame.Position = UDim2.new(0.5, 0, 0, 25)
+frame.Size = UDim2.fromOffset(320, 330)
 frame.BackgroundColor3 = Color3.fromRGB(30, 32, 40)
 frame.BorderSizePixel = 0
 frame.Parent = gui
@@ -373,67 +746,247 @@ local title = Instance.new("TextLabel")
 title.Position = UDim2.fromOffset(12, 5)
 title.Size = UDim2.new(1, -55, 0, 35)
 title.BackgroundTransparency = 1
-title.Text = "🐝 Garden Collector V2"
+title.Text = "Garden Collector V4"
 title.TextColor3 = Color3.fromRGB(255, 220, 80)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 17
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = frame
 
--- Nút ẩn menu
 local closeButton = Instance.new("TextButton")
 closeButton.AnchorPoint = Vector2.new(1, 0)
 closeButton.Position = UDim2.new(1, -8, 0, 7)
 closeButton.Size = UDim2.fromOffset(31, 31)
 closeButton.BackgroundColor3 = Color3.fromRGB(65, 67, 78)
-closeButton.Text = "×"
+closeButton.Text = "x"
 closeButton.TextColor3 = Color3.new(1, 1, 1)
 closeButton.Font = Enum.Font.GothamBold
-closeButton.TextSize = 22
+closeButton.TextSize = 18
 closeButton.Parent = frame
 
 local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 8)
 closeCorner.Parent = closeButton
 
+local saveCornerButton = Instance.new("TextButton")
+saveCornerButton.Position = UDim2.fromOffset(10, 45)
+saveCornerButton.Size = UDim2.fromOffset(215, 40)
+saveCornerButton.BackgroundColor3 = Color3.fromRGB(65, 135, 220)
+saveCornerButton.TextColor3 = Color3.new(1, 1, 1)
+saveCornerButton.Font = Enum.Font.GothamBold
+saveCornerButton.TextSize = 14
+saveCornerButton.Parent = frame
+
+local saveCornerRound = Instance.new("UICorner")
+saveCornerRound.CornerRadius = UDim.new(0, 8)
+saveCornerRound.Parent = saveCornerButton
+
+local resetButton = Instance.new("TextButton")
+resetButton.Position = UDim2.fromOffset(232, 45)
+resetButton.Size = UDim2.fromOffset(78, 40)
+resetButton.BackgroundColor3 = Color3.fromRGB(110, 75, 75)
+resetButton.Text = "XOA"
+resetButton.TextColor3 = Color3.new(1, 1, 1)
+resetButton.Font = Enum.Font.GothamBold
+resetButton.TextSize = 14
+resetButton.Parent = frame
+
+local resetRound = Instance.new("UICorner")
+resetRound.CornerRadius = UDim.new(0, 8)
+resetRound.Parent = resetButton
+
 local toggleButton = Instance.new("TextButton")
-toggleButton.Position = UDim2.fromOffset(10, 45)
+toggleButton.Position = UDim2.fromOffset(10, 94)
 toggleButton.Size = UDim2.new(1, -20, 0, 43)
 toggleButton.BackgroundColor3 = Color3.fromRGB(45, 170, 95)
-toggleButton.Text = "BẮT ĐẦU"
+toggleButton.Text = "BAT DAU"
 toggleButton.TextColor3 = Color3.new(1, 1, 1)
 toggleButton.Font = Enum.Font.GothamBold
 toggleButton.TextSize = 16
 toggleButton.Parent = frame
 
-local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0, 9)
-toggleCorner.Parent = toggleButton
+local toggleRound = Instance.new("UICorner")
+toggleRound.CornerRadius = UDim.new(0, 9)
+toggleRound.Parent = toggleButton
+
+local speedModeButton = Instance.new("TextButton")
+speedModeButton.Position = UDim2.fromOffset(10, 146)
+speedModeButton.Size = UDim2.new(1, -20, 0, 35)
+speedModeButton.TextColor3 = Color3.new(1, 1, 1)
+speedModeButton.Font = Enum.Font.GothamBold
+speedModeButton.TextSize = 13
+speedModeButton.Parent = frame
+
+local speedModeRound = Instance.new("UICorner")
+speedModeRound.CornerRadius = UDim.new(0, 8)
+speedModeRound.Parent = speedModeButton
+
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Position = UDim2.fromOffset(10, 187)
+speedLabel.Size = UDim2.new(1, -20, 0, 22)
+speedLabel.BackgroundTransparency = 1
+speedLabel.TextColor3 = Color3.fromRGB(225, 225, 230)
+speedLabel.Font = Enum.Font.GothamBold
+speedLabel.TextSize = 13
+speedLabel.Parent = frame
+
+local minusButton = Instance.new("TextButton")
+minusButton.Position = UDim2.fromOffset(10, 213)
+minusButton.Size = UDim2.fromOffset(36, 34)
+minusButton.BackgroundColor3 = Color3.fromRGB(65, 67, 78)
+minusButton.Text = "-"
+minusButton.TextColor3 = Color3.new(1, 1, 1)
+minusButton.Font = Enum.Font.GothamBold
+minusButton.TextSize = 20
+minusButton.Parent = frame
+
+local minusRound = Instance.new("UICorner")
+minusRound.CornerRadius = UDim.new(0, 8)
+minusRound.Parent = minusButton
+
+local plusButton = Instance.new("TextButton")
+plusButton.Position = UDim2.fromOffset(274, 213)
+plusButton.Size = UDim2.fromOffset(36, 34)
+plusButton.BackgroundColor3 = Color3.fromRGB(65, 67, 78)
+plusButton.Text = "+"
+plusButton.TextColor3 = Color3.new(1, 1, 1)
+plusButton.Font = Enum.Font.GothamBold
+plusButton.TextSize = 20
+plusButton.Parent = frame
+
+local plusRound = Instance.new("UICorner")
+plusRound.CornerRadius = UDim.new(0, 8)
+plusRound.Parent = plusButton
+
+local speedTrack = Instance.new("Frame")
+speedTrack.Position = UDim2.fromOffset(55, 226)
+speedTrack.Size = UDim2.fromOffset(210, 8)
+speedTrack.BackgroundColor3 = Color3.fromRGB(75, 77, 88)
+speedTrack.BorderSizePixel = 0
+speedTrack.Active = true
+speedTrack.Parent = frame
+
+local trackRound = Instance.new("UICorner")
+trackRound.CornerRadius = UDim.new(1, 0)
+trackRound.Parent = speedTrack
+
+local speedFill = Instance.new("Frame")
+speedFill.Size = UDim2.fromScale(0, 1)
+speedFill.BackgroundColor3 = Color3.fromRGB(255, 190, 45)
+speedFill.BorderSizePixel = 0
+speedFill.Parent = speedTrack
+
+local fillRound = Instance.new("UICorner")
+fillRound.CornerRadius = UDim.new(1, 0)
+fillRound.Parent = speedFill
+
+local speedKnob = Instance.new("Frame")
+speedKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+speedKnob.Position = UDim2.fromScale(0, 0.5)
+speedKnob.Size = UDim2.fromOffset(20, 20)
+speedKnob.BackgroundColor3 = Color3.fromRGB(255, 220, 90)
+speedKnob.BorderSizePixel = 0
+speedKnob.Parent = speedTrack
+
+local knobRound = Instance.new("UICorner")
+knobRound.CornerRadius = UDim.new(1, 0)
+knobRound.Parent = speedKnob
+
+local speedInput = Instance.new("TextButton")
+speedInput.Position = UDim2.new(0, 0, 0.5, -17)
+speedInput.Size = UDim2.new(1, 0, 0, 34)
+speedInput.BackgroundTransparency = 1
+speedInput.Text = ""
+speedInput.Parent = speedTrack
 
 local status = Instance.new("TextLabel")
-status.Position = UDim2.fromOffset(10, 95)
-status.Size = UDim2.new(1, -20, 0, 30)
-status.BackgroundTransparency = 1
-status.Text = "Đứng giữa khu vườn rồi bấm Bắt đầu"
-status.TextColor3 = Color3.fromRGB(210, 210, 215)
+status.Position = UDim2.fromOffset(10, 258)
+status.Size = UDim2.new(1, -20, 0, 60)
+status.BackgroundColor3 = Color3.fromRGB(40, 42, 51)
+status.Text = "Dung tai goc thu nhat roi bam Luu goc"
+status.TextColor3 = Color3.fromRGB(215, 215, 220)
 status.Font = Enum.Font.Gotham
 status.TextSize = 12
 status.TextWrapped = true
 status.Parent = frame
 
--- Nút ong nhỏ dùng để mở lại menu
+local statusRound = Instance.new("UICorner")
+statusRound.CornerRadius = UDim.new(0, 8)
+statusRound.Parent = status
+
 local openButton = Instance.new("TextButton")
 openButton.Position = UDim2.new(0, 12, 0.45, 0)
 openButton.Size = UDim2.fromOffset(52, 52)
 openButton.BackgroundColor3 = Color3.fromRGB(255, 195, 45)
-openButton.Text = "🐝"
-openButton.TextSize = 27
+openButton.Text = "BEE"
+openButton.TextColor3 = Color3.fromRGB(45, 35, 15)
+openButton.Font = Enum.Font.GothamBold
+openButton.TextSize = 13
 openButton.Visible = false
 openButton.Parent = gui
 
 local openCorner = Instance.new("UICorner")
 openCorner.CornerRadius = UDim.new(1, 0)
 openCorner.Parent = openButton
+
+local function stopMoving()
+    local _, humanoid, root = getCharacter()
+    if humanoid and root then
+        humanoid:MoveTo(root.Position)
+    end
+end
+
+local function updateSpeedInterface()
+    local range = Config.MaximumWalkSpeed - Config.MinimumWalkSpeed
+    local ratio = (Config.SelectedWalkSpeed - Config.MinimumWalkSpeed) / range
+    ratio = math.clamp(ratio, 0, 1)
+
+    speedFill.Size = UDim2.fromScale(ratio, 1)
+    speedKnob.Position = UDim2.fromScale(ratio, 0.5)
+    speedLabel.Text = string.format("TOC DO NHAN VAT: %d", Config.SelectedWalkSpeed)
+
+    if Config.CustomSpeedEnabled then
+        speedModeButton.Text = "TOC DO RIENG: BAT"
+        speedModeButton.BackgroundColor3 = Color3.fromRGB(45, 155, 90)
+    else
+        speedModeButton.Text = "TOC DO RIENG: TAT - DUNG BUFF GAME"
+        speedModeButton.BackgroundColor3 = Color3.fromRGB(80, 82, 92)
+    end
+end
+
+local function setSelectedSpeed(value)
+    value = math.clamp(value, Config.MinimumWalkSpeed, Config.MaximumWalkSpeed)
+    value = math.floor(value / Config.WalkSpeedStep + 0.5) * Config.WalkSpeedStep
+    Config.SelectedWalkSpeed = value
+    updateSpeedInterface()
+
+    if Enabled and Config.CustomSpeedEnabled then
+        local _, humanoid = getCharacter()
+        if humanoid then
+            applyCustomSpeed(humanoid, true)
+        end
+    end
+end
+
+local function updateInterface()
+    if #SavedCorners < 4 then
+        saveCornerButton.Text = string.format("LUU GOC %d/4", #SavedCorners + 1)
+        saveCornerButton.BackgroundColor3 = Color3.fromRGB(65, 135, 220)
+    else
+        saveCornerButton.Text = "DA LUU DU 4 GOC"
+        saveCornerButton.BackgroundColor3 = Color3.fromRGB(80, 100, 110)
+    end
+
+    if Enabled then
+        toggleButton.Text = "DUNG"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(200, 70, 70)
+    else
+        toggleButton.Text = "BAT DAU"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(45, 170, 95)
+    end
+
+    updateSpeedInterface()
+end
 
 closeButton.Activated:Connect(function()
     frame.Visible = false
@@ -445,48 +998,181 @@ openButton.Activated:Connect(function()
     frame.Visible = true
 end)
 
-local function stopMoving()
-    local _, humanoid, root = getCharacter()
-
-    if humanoid and root then
-        humanoid:MoveTo(root.Position)
-    end
-end
-
-local function updateToggleButton()
+saveCornerButton.Activated:Connect(function()
     if Enabled then
-        toggleButton.Text = "DỪNG"
-        toggleButton.BackgroundColor3 = Color3.fromRGB(200, 70, 70)
-    else
-        toggleButton.Text = "BẮT ĐẦU"
-        toggleButton.BackgroundColor3 = Color3.fromRGB(45, 170, 95)
+        status.Text = "Hay dung thu thap truoc khi luu lai khu vuc."
+        return
     end
-end
+
+    if #SavedCorners >= 4 then
+        status.Text = "Da du 4 goc. Bam XOA neu muon luu lai."
+        return
+    end
+
+    local _, _, root = getCharacter()
+    if not root then
+        status.Text = "Khong tim thay nhan vat."
+        return
+    end
+
+    for _, savedPosition in ipairs(SavedCorners) do
+        if horizontalDistance(root.Position, savedPosition) < Config.MinimumCornerSpacing then
+            status.Text = "Goc nay qua gan goc da luu. Hay di xa hon."
+            return
+        end
+    end
+
+    table.insert(SavedCorners, root.Position)
+
+    if #SavedCorners == 4 then
+        if rebuildZone() then
+            status.Text = "Da tao khu vuc 4 goc. Chon toc do roi bam BAT DAU."
+        else
+            status.Text = "4 goc khong hop le hoac khu vuc qua nho. Hay bam XOA."
+        end
+    else
+        status.Text = string.format("Da luu goc %d. Hay di toi goc tiep theo.", #SavedCorners)
+    end
+
+    refreshZonePreview()
+    updateInterface()
+end)
+
+resetButton.Activated:Connect(function()
+    Enabled = false
+    CurrentTarget = nil
+    restoreOriginalSpeed()
+    stopMoving()
+
+    ZoneCenter = nil
+    ZoneValid = false
+    table.clear(SavedCorners)
+    table.clear(ZonePoints)
+    table.clear(BlockedUntil)
+
+    refreshZonePreview()
+    updateInterface()
+    status.Text = "Da xoa. Dung tai goc thu nhat roi bam LUU GOC."
+end)
 
 toggleButton.Activated:Connect(function()
     if Enabled then
         Enabled = false
         CurrentTarget = nil
-        status.Text = "Đã dừng"
+        restoreOriginalSpeed()
         stopMoving()
+        status.Text = "Da dung va khoi phuc toc do ban dau."
     else
-        local _, _, root = getCharacter()
-
-        if not root then
-            status.Text = "Không tìm thấy nhân vật"
+        if not ZoneValid then
+            status.Text = "Ban can luu du 4 goc hop le truoc."
             return
         end
 
-        FieldCenter = root.Position
+        local _, humanoid = getCharacter()
+        if not humanoid then
+            status.Text = "Khong tim thay nhan vat."
+            return
+        end
+
         Enabled = true
-        status.Text = "Đang tìm Token và Totem..."
+        if Config.CustomSpeedEnabled then
+            applyCustomSpeed(humanoid, true)
+        end
+
+        status.Text = string.format(
+            "Dang thu thap trong 4 goc | Toc do: %.0f",
+            humanoid.WalkSpeed
+        )
     end
 
-    updateToggleButton()
+    updateInterface()
 end)
 
+speedModeButton.Activated:Connect(function()
+    Config.CustomSpeedEnabled = not Config.CustomSpeedEnabled
+
+    if Enabled then
+        local _, humanoid = getCharacter()
+
+        if Config.CustomSpeedEnabled and humanoid then
+            applyCustomSpeed(humanoid, true)
+            status.Text = "Da bat toc do tuy chinh."
+        else
+            restoreOriginalSpeed()
+            status.Text = "Da tat toc do rieng, dang dung buff toc do cua game."
+        end
+    end
+
+    updateSpeedInterface()
+end)
+
+minusButton.Activated:Connect(function()
+    setSelectedSpeed(Config.SelectedWalkSpeed - Config.WalkSpeedStep)
+end)
+
+plusButton.Activated:Connect(function()
+    setSelectedSpeed(Config.SelectedWalkSpeed + Config.WalkSpeedStep)
+end)
+
+local draggingSpeed = false
+local activeTouch = nil
+
+local function setSpeedFromScreenX(screenX)
+    if speedTrack.AbsoluteSize.X <= 0 then
+        return
+    end
+
+    local ratio = math.clamp(
+        (screenX - speedTrack.AbsolutePosition.X) / speedTrack.AbsoluteSize.X,
+        0,
+        1
+    )
+
+    local value = Config.MinimumWalkSpeed
+        + ratio * (Config.MaximumWalkSpeed - Config.MinimumWalkSpeed)
+
+    setSelectedSpeed(value)
+end
+
+speedInput.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch
+    then
+        draggingSpeed = true
+
+        if input.UserInputType == Enum.UserInputType.Touch then
+            activeTouch = input
+        end
+
+        setSpeedFromScreenX(input.Position.X)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if not draggingSpeed then
+        return
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input == activeTouch
+    then
+        setSpeedFromScreenX(input.Position.X)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input == activeTouch
+    then
+        draggingSpeed = false
+        activeTouch = nil
+    end
+end)
+
+updateInterface()
+
 --==============================================================
--- VÒNG LẶP CHÍNH
+-- VONG LAP CHINH
 --==============================================================
 
 task.spawn(function()
@@ -497,68 +1183,74 @@ task.spawn(function()
             local character, humanoid, root = getCharacter()
 
             if not character then
-                status.Text = "Đang chờ nhân vật..."
+                status.Text = "Dang cho nhan vat..."
                 task.wait(0.25)
+            elseif not ZoneValid then
+                Enabled = false
+                restoreOriginalSpeed()
+                updateInterface()
             else
-                local target = getClosestTarget(root.Position)
+                applyCustomSpeed(humanoid, false)
 
-                if target then
-                    CurrentTarget = target
-                    status.Text = "Đang nhặt: " .. target.Name
-
-                    local reached = walkThroughTarget(
-                        target,
-                        humanoid,
-                        root
-                    )
-
-                    if target:IsDescendantOf(workspace) then
-                        if reached then
-                            -- Bỏ qua mục tiêu vừa chạm và đi tiếp ngay
-                            blockTarget(
-                                target,
-                                Config.VisitedCooldown
-                            )
-                        else
-                            blockTarget(
-                                target,
-                                Config.FailedCooldown
-                            )
-                        end
-                    end
-
+                if not isInsideZone(root.Position, Config.PlayerBoundaryTolerance) then
                     CurrentTarget = nil
-
-                    -- Không task.wait tại đây:
-                    -- lập tức chọn mục tiêu tiếp theo
+                    status.Text = string.format(
+                        "Ra ngoai khu vuc - dang ve trung tam | Toc do: %.0f",
+                        humanoid.WalkSpeed
+                    )
+                    returnToZoneCenter(character, humanoid, root)
                 else
-                    status.Text = "Đang đi tuần quanh khu vườn"
+                    local target = getClosestTarget(root.Position)
 
-                    local patrolPoint = getRandomPatrolPoint(character)
-                    humanoid:MoveTo(patrolPoint)
+                    if target then
+                        CurrentTarget = target
+                        status.Text = string.format(
+                            "Dang nhat: %s | Toc do: %.0f",
+                            target.Name,
+                            humanoid.WalkSpeed
+                        )
 
-                    local deadline = os.clock()
-                        + Config.PatrolMoveTime
+                        local reached = walkThroughTarget(target, humanoid, root)
 
-                    while Enabled and os.clock() < deadline do
-                        if humanoid.Health <= 0 then
-                            break
+                        if target:IsDescendantOf(workspace) then
+                            blockTarget(
+                                target,
+                                reached and Config.VisitedCooldown or Config.FailedCooldown
+                            )
                         end
 
-                        -- Có vật phẩm mới thì chuyển hướng ngay
-                        if getClosestTarget(root.Position) then
-                            break
-                        end
+                        CurrentTarget = nil
+                        task.wait()
+                    else
+                        status.Text = string.format(
+                            "Dang di tuan trong 4 goc | Toc do: %.0f",
+                            humanoid.WalkSpeed
+                        )
 
-                        -- Đổi điểm trước khi tới hẳn để không đứng lại
-                        if horizontalDistance(
-                            root.Position,
-                            patrolPoint
-                        ) <= Config.PatrolSwitchDistance then
-                            break
-                        end
+                        local patrolPoint = getRandomPatrolPoint(character)
+                        humanoid:MoveTo(patrolPoint)
+                        local deadline = os.clock() + Config.PatrolMoveTime
 
-                        task.wait(Config.UpdateInterval)
+                        while Enabled and os.clock() < deadline do
+                            applyCustomSpeed(humanoid, false)
+
+                            if humanoid.Health <= 0
+                                or not isInsideZone(
+                                    root.Position,
+                                    Config.PlayerBoundaryTolerance
+                                )
+                                or getClosestTarget(root.Position)
+                            then
+                                break
+                            end
+
+                            local _, _, _, switchDistance = getAdaptiveMovement(humanoid)
+                            if horizontalDistance(root.Position, patrolPoint) <= switchDistance then
+                                break
+                            end
+
+                            task.wait(Config.UpdateInterval)
+                        end
                     end
                 end
             end
@@ -570,7 +1262,8 @@ Player.CharacterRemoving:Connect(function()
     if Enabled then
         Enabled = false
         CurrentTarget = nil
-        status.Text = "Nhân vật hồi sinh — hãy bật lại"
-        updateToggleButton()
+        restoreOriginalSpeed()
+        status.Text = "Nhan vat hoi sinh - hay bat lai."
+        updateInterface()
     end
 end)
