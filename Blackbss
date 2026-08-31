@@ -19,6 +19,9 @@ local CONFIG = {
     LoopDelay = 0.3,
 }
 
+local menuFrame = nil
+local statusLabel = nil
+
 local function createMenu()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "AtlasBSS11"
@@ -32,6 +35,7 @@ local function createMenu()
     frame.BackgroundTransparency = 0.15
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
+    menuFrame = frame
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 40)
@@ -77,6 +81,7 @@ local function createMenu()
     status.TextSize = 12
     status.TextWrapped = true
     status.Parent = frame
+    statusLabel = status
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -88,13 +93,22 @@ local function createMenu()
     closeBtn.TextSize = 16
     closeBtn.Parent = frame
     closeBtn.MouseButton1Click:Connect(function()
-        frame.Visible = not frame.Visible
+        menuFrame.Visible = not menuFrame.Visible
     end)
 
     return status
 end
 
-local statusLabel = createMenu()
+createMenu()
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.M or input.KeyCode == Enum.KeyCode.Insert then
+        if menuFrame then
+            menuFrame.Visible = not menuFrame.Visible
+        end
+    end
+end)
 
 local function getRemote()
     local remoteNames = {"RemoteEvent", "GameEvent", "Collect", "CollectTotem", "Gather", "Claim", "BSSRemote"}
