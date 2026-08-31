@@ -1,14 +1,13 @@
 --[[
-    Script: Atlas Hub - Bee Swarm Simulator 1:1 (Bản cải tiến)
-    Tác giả: AI Assistant
+    Script: Atlas Hub - Bee Swarm Simulator 1:1 (Bản sửa lỗi)
     Sử dụng Rayfield Library
-    Hướng dẫn: Thay đổi các mục được đánh dấu CẦN CHỈNH cho phù hợp với game thực tế.
+    Chạy ổn định hơn với vòng lặp trung tâm.
 ]]
 
--- Tải Rayfield Library
+-- Tải Rayfield
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- ==================== CỬA SỔ CHÍNH ====================
+-- Cửa sổ chính
 local Window = Rayfield:CreateWindow({
     Name = "Atlas Hub - Bee Swarm 1:1",
     LoadingTitle = "Đang tải...",
@@ -18,153 +17,9 @@ local Window = Rayfield:CreateWindow({
         FolderName = "AtlasConfig",
         FileName = "AtlasHub"
     },
-    Discord = {
-        Enabled = false,
-        Invite = "",
-        RememberJoins = true
-    },
-    KeySystem = false,
 })
 
--- ==================== TAB CHÍNH ====================
-local MainTab = Window:CreateTab("Main", 4483362458) -- Icon ID có thể thay
-
--- Dropdown chọn cánh đồng
-local FieldDropdown = MainTab:CreateDropdown({
-    Name = "Chọn Cánh Đồng",
-    Options = {"Dandelion Field", "Sunflower Field", "Mushroom Field", "Blue Flower Field", "Clover Field", "Strawberry Field", "Bamboo Field", "Pine Tree Forest", "Pumpkin Patch", "Mountain Top Field", "Cactus Field", "Rose Field", "Spider Field", "Pepper Patch", "Coconut Field", "Stump Field"},
-    CurrentOption = "Dandelion Field",
-    MultipleOptions = false,
-    Flag = "FieldDropdown",
-    Callback = function(Option)
-        Settings.SelectedField = Option
-    end,
-})
-
--- Toggle Auto Farm
-local AutoFarmToggle = MainTab:CreateToggle({
-    Name = "Auto Farm Field",
-    CurrentValue = false,
-    Flag = "AutoFarm",
-    Callback = function(Value)
-        Settings.AutoFarm = Value
-        if Value then
-            task.spawn(autoFarmLoop)
-        end
-    end,
-})
-
--- Toggle Auto Collect
-local AutoCollectToggle = MainTab:CreateToggle({
-    Name = "Auto Collect Vật Phẩm",
-    CurrentValue = false,
-    Flag = "AutoCollect",
-    Callback = function(Value)
-        Settings.AutoCollect = Value
-        if Value then
-            task.spawn(autoCollectLoop)
-        end
-    end,
-})
-
--- Toggle Auto Token Link
-local AutoTokenToggle = MainTab:CreateToggle({
-    Name = "Auto Token Link",
-    CurrentValue = false,
-    Flag = "AutoToken",
-    Callback = function(Value)
-        Settings.AutoTokenLink = Value
-        if Value then
-            task.spawn(autoTokenLinkLoop)
-        end
-    end,
-})
-
--- Toggle Auto Convert
-local AutoConvertToggle = MainTab:CreateToggle({
-    Name = "Auto Convert Pollen Khi Đầy",
-    CurrentValue = false,
-    Flag = "AutoConvert",
-    Callback = function(Value)
-        Settings.AutoConvert = Value
-        if Value then
-            task.spawn(autoConvertLoop)
-        end
-    end,
-})
-
--- ==================== TAB BEES & COMBAT ====================
-local CombatTab = Window:CreateTab("Bees & Combat", 4483362458)
-
--- Toggle Auto Map Abilities
-local AutoMapAbilitiesToggle = CombatTab:CreateToggle({
-    Name = "Auto Map Abilities",
-    CurrentValue = false,
-    Flag = "AutoMapAbilities",
-    Callback = function(Value)
-        Settings.AutoMapAbilities = Value
-        if Value then
-            task.spawn(autoMapAbilitiesLoop)
-        end
-    end,
-})
-
--- Toggle Auto Kill Monsters
-local AutoKillToggle = CombatTab:CreateToggle({
-    Name = "Auto Kill Monsters",
-    CurrentValue = false,
-    Flag = "AutoKill",
-    Callback = function(Value)
-        Settings.AutoKillMonsters = Value
-        if Value then
-            task.spawn(autoKillMonstersLoop)
-        end
-    end,
-})
-
--- ==================== TAB DISPENSERS & QUESTS ====================
-local DispenserTab = Window:CreateTab("Dispensers", 4483362458)
-
-local AutoDispenserToggle = DispenserTab:CreateToggle({
-    Name = "Auto Free Dispenser",
-    CurrentValue = false,
-    Flag = "AutoDispenser",
-    Callback = function(Value)
-        Settings.AutoDispenser = Value
-        if Value then
-            task.spawn(autoDispenserLoop)
-        end
-    end,
-})
-
-local AutoBoosterToggle = DispenserTab:CreateToggle({
-    Name = "Auto Field Boosters",
-    CurrentValue = false,
-    Flag = "AutoBooster",
-    Callback = function(Value)
-        Settings.AutoFieldBoosters = Value
-        if Value then
-            task.spawn(autoFieldBoostersLoop)
-        end
-    end,
-})
-
--- ==================== TAB SETTINGS ====================
-local SettingsTab = Window:CreateTab("Settings", 4483362458)
-
-local TweenSpeedSlider = SettingsTab:CreateSlider({
-    Name = "Tốc độ di chuyển (Tween Speed)",
-    Range = {5, 60},
-    Increment = 1,
-    Suffix = "studs/s",
-    CurrentValue = 16,
-    Flag = "TweenSpeed",
-    Callback = function(Value)
-        Settings.TweenSpeed = Value
-    end,
-})
-
--- ==================== BIẾN TOÀN CỤC ====================
+-- Biến toàn cục
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local VirtualUser = game:GetService("VirtualUser")
@@ -185,7 +40,125 @@ local Settings = {
     TweenSpeed = 16,
 }
 
--- ==================== HÀM HỮU ÍCH ====================
+-- ==================== TAB ====================
+local MainTab = Window:CreateTab("Main", 4483362458)
+local CombatTab = Window:CreateTab("Bees & Combat", 4483362458)
+local DispenserTab = Window:CreateTab("Dispensers", 4483362458)
+local SettingsTab = Window:CreateTab("Settings", 4483362458)
+
+-- Dropdown Field
+MainTab:CreateDropdown({
+    Name = "Chọn Cánh Đồng",
+    Options = {"Dandelion Field", "Sunflower Field", "Mushroom Field", "Blue Flower Field", "Clover Field", "Strawberry Field", "Bamboo Field", "Pine Tree Forest", "Pumpkin Patch", "Mountain Top Field", "Cactus Field", "Rose Field", "Spider Field", "Pepper Patch", "Coconut Field", "Stump Field"},
+    CurrentOption = "Dandelion Field",
+    Flag = "FieldDropdown",
+    Callback = function(Option)
+        Settings.SelectedField = Option
+        print("Đã chọn field:", Option)
+    end,
+})
+
+-- Toggle Auto Farm
+MainTab:CreateToggle({
+    Name = "Auto Farm Field",
+    CurrentValue = false,
+    Flag = "AutoFarm",
+    Callback = function(Value)
+        Settings.AutoFarm = Value
+        print("Auto Farm:", Value)
+    end,
+})
+
+-- Toggle Auto Collect
+MainTab:CreateToggle({
+    Name = "Auto Collect Vật Phẩm",
+    CurrentValue = false,
+    Flag = "AutoCollect",
+    Callback = function(Value)
+        Settings.AutoCollect = Value
+        print("Auto Collect:", Value)
+    end,
+})
+
+-- Toggle Auto Token Link
+MainTab:CreateToggle({
+    Name = "Auto Token Link",
+    CurrentValue = false,
+    Flag = "AutoToken",
+    Callback = function(Value)
+        Settings.AutoTokenLink = Value
+        print("Auto Token Link:", Value)
+    end,
+})
+
+-- Toggle Auto Convert
+MainTab:CreateToggle({
+    Name = "Auto Convert Pollen Khi Đầy",
+    CurrentValue = false,
+    Flag = "AutoConvert",
+    Callback = function(Value)
+        Settings.AutoConvert = Value
+        print("Auto Convert:", Value)
+    end,
+})
+
+-- Combat
+CombatTab:CreateToggle({
+    Name = "Auto Map Abilities",
+    CurrentValue = false,
+    Flag = "AutoMapAbilities",
+    Callback = function(Value)
+        Settings.AutoMapAbilities = Value
+        print("Auto Map Abilities:", Value)
+    end,
+})
+
+CombatTab:CreateToggle({
+    Name = "Auto Kill Monsters",
+    CurrentValue = false,
+    Flag = "AutoKill",
+    Callback = function(Value)
+        Settings.AutoKillMonsters = Value
+        print("Auto Kill Monsters:", Value)
+    end,
+})
+
+-- Dispensers
+DispenserTab:CreateToggle({
+    Name = "Auto Free Dispenser",
+    CurrentValue = false,
+    Flag = "AutoDispenser",
+    Callback = function(Value)
+        Settings.AutoDispenser = Value
+        print("Auto Dispenser:", Value)
+    end,
+})
+
+DispenserTab:CreateToggle({
+    Name = "Auto Field Boosters",
+    CurrentValue = false,
+    Flag = "AutoBooster",
+    Callback = function(Value)
+        Settings.AutoFieldBoosters = Value
+        print("Auto Field Boosters:", Value)
+    end,
+})
+
+-- Settings
+SettingsTab:CreateSlider({
+    Name = "Tốc độ di chuyển",
+    Range = {5, 60},
+    Increment = 1,
+    Suffix = "studs/s",
+    CurrentValue = 16,
+    Flag = "TweenSpeed",
+    Callback = function(Value)
+        Settings.TweenSpeed = Value
+        print("Tween Speed:", Value)
+    end,
+})
+
+-- ==================== HÀM HỖ TRỢ ====================
 local function getCharacter()
     return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 end
@@ -198,18 +171,7 @@ local function getRootPart()
     return getCharacter():WaitForChild("HumanoidRootPart")
 end
 
--- Hàm di chuyển nhân vật bằng Humanoid:MoveTo (an toàn)
-local function moveToPosition(position)
-    local humanoid = getHumanoid()
-    humanoid:MoveTo(position)
-    -- Chờ đến khi đến gần
-    local root = getRootPart()
-    repeat
-        task.wait()
-    until (root.Position - position).Magnitude < 5 or not Settings.AutoFarm and not Settings.AutoCollect and not Settings.AutoTokenLink and not Settings.AutoConvert and not Settings.AutoMapAbilities and not Settings.AutoKillMonsters and not Settings.AutoDispenser and not Settings.AutoFieldBoosters
-end
-
--- Tìm object theo tên (có thể dùng class)
+-- Tìm object theo tên
 local function findObject(name, parent)
     parent = parent or Workspace
     for _, obj in ipairs(parent:GetDescendants()) do
@@ -222,255 +184,235 @@ end
 
 -- Lấy vị trí cánh đồng
 local function getFieldPosition(fieldName)
-    -- CẦN CHỈNH: Tìm đúng object chứa cánh đồng, có thể là Model hoặc Part
+    -- CẦN CHỈNH: Tìm đúng object trong game
     local fieldObj = findObject(fieldName)
     if fieldObj then
         if fieldObj:IsA("BasePart") then
             return fieldObj.Position
         elseif fieldObj:IsA("Model") then
             local primary = fieldObj.PrimaryPart
-            if primary then
-                return primary.Position
-            end
+            if primary then return primary.Position end
         end
     end
-    -- Nếu không tìm thấy, trả về vị trí mặc định (bạn nên thay bằng tọa độ chính xác)
-    warn("Không tìm thấy cánh đồng:", fieldName)
-    return Vector3.new(0, 20, 0)
+    warn("Không tìm thấy field:", fieldName)
+    return nil
 end
 
 -- Lấy vị trí Hive
 local function getHivePosition()
-    -- CẦN CHỈNH: Tìm object Hive của người chơi
+    -- CẦN CHỈNH: Tìm Hive
     local hive = findObject("Hive")
     if hive then
         if hive:IsA("BasePart") then
             return hive.Position
         elseif hive:IsA("Model") then
             local primary = hive.PrimaryPart
-            if primary then
-                return primary.Position
-            end
+            if primary then return primary.Position end
         end
     end
-    warn("Không tìm thấy Hive, dùng vị trí spawn")
-    local spawnLocation = LocalPlayer.RespawnLocation
-    return spawnLocation and spawnLocation.Position or Vector3.new(0, 20, 0)
+    warn("Không tìm thấy Hive")
+    return nil
 end
 
 -- Kiểm tra phấn hoa đầy
 local function isPollenFull()
-    -- CẦN CHỈNH: Tìm giá trị phấn hoa hiện tại và tối đa trong Player
+    -- CẦN CHỈNH: Kiểm tra giá trị phấn hoa
     local pollen = LocalPlayer:FindFirstChild("Pollen") or LocalPlayer:FindFirstChild("PollenCount")
     local maxPollen = LocalPlayer:FindFirstChild("MaxPollen") or LocalPlayer:FindFirstChild("PollenCapacity")
     if pollen and maxPollen then
         return pollen.Value >= maxPollen.Value
     end
-    -- Nếu không có, kiểm tra qua leaderstats
-    local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
-    if leaderstats then
-        local poll = leaderstats:FindFirstChild("Pollen")
-        local maxPoll = leaderstats:FindFirstChild("MaxPollen")
-        if poll and maxPoll then
-            return poll.Value >= maxPoll.Value
-        end
-    end
     return false
 end
 
--- Hàm thu thập vật phẩm (token, ability)
-local function collectItem(itemPart)
-    if not itemPart or not itemPart.Parent then return end
+-- Hàm di chuyển an toàn
+local function moveToPosition(position)
+    if not position then return end
+    local humanoid = getHumanoid()
     local root = getRootPart()
-    local distance = (itemPart.Position - root.Position).Magnitude
-    if distance < 10 then
-        moveToPosition(itemPart.Position)
-        task.wait(0.5)
-        -- Chạm vào item bằng cách di chuyển root part (có thể dùng CFrame)
-        root.CFrame = CFrame.new(itemPart.Position)
-        task.wait(0.1)
-    end
+    humanoid:MoveTo(position)
+    -- Chờ tối đa 10 giây để đến nơi
+    local timeout = 0
+    repeat
+        task.wait()
+        timeout = timeout + task.wait()
+    until (root.Position - position).Magnitude < 5 or timeout > 10
 end
 
--- ==================== VÒNG LẶP CHỨC NĂNG ====================
-
--- Auto Farm Field
-function autoFarmLoop()
-    while Settings.AutoFarm do
-        local fieldName = Settings.SelectedField
-        if fieldName then
-            local pos = getFieldPosition(fieldName)
+-- ==================== CÁC HÀNH ĐỘNG ====================
+local function actionAutoFarm()
+    if not Settings.AutoFarm then return end
+    local fieldName = Settings.SelectedField
+    if fieldName then
+        local pos = getFieldPosition(fieldName)
+        if pos then
             moveToPosition(pos)
-            -- CẦN CHỈNH: Thêm logic thu hoạch phấn hoa (ví dụ: kích hoạt tool)
+            -- CẦN CHỈNH: Thêm hành động thu hoạch
             local tool = getCharacter():FindFirstChildOfClass("Tool")
-            if tool then
-                tool:Activate()
-            end
-            task.wait(1)
-        else
-            task.wait(1)
+            if tool then tool:Activate() end
         end
     end
 end
 
--- Auto Collect
-function autoCollectLoop()
-    while Settings.AutoCollect do
-        -- CẦN CHỈNH: Tìm các vật phẩm có thể nhặt, ví dụ bằng thuộc tính "Collectible" hoặc tên
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and obj:GetAttribute("Collectible") == true then
-                collectItem(obj)
-            elseif obj:IsA("Tool") and (obj.Name:lower():find("token") or obj.Name:lower():find("ability")) then
-                local handle = obj:FindFirstChild("Handle")
-                if handle then
-                    collectItem(handle)
-                end
+local function actionAutoCollect()
+    if not Settings.AutoCollect then return end
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj:GetAttribute("Collectible") == true then
+            local root = getRootPart()
+            if (obj.Position - root.Position).Magnitude < 10 then
+                moveToPosition(obj.Position)
+                task.wait(0.2)
             end
-        end
-        task.wait(0.5)
-    end
-end
-
--- Auto Token Link
-function autoTokenLinkLoop()
-    while Settings.AutoTokenLink do
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and obj.Name:lower():find("token") and obj.Name:lower():find("link") then
+        elseif obj:IsA("Tool") and (obj.Name:lower():find("token") or obj.Name:lower():find("ability")) then
+            local handle = obj:FindFirstChild("Handle")
+            if handle then
                 local root = getRootPart()
-                if (root.Position - obj.Position).Magnitude < 20 then
-                    moveToPosition(obj.Position)
-                    task.wait(0.5)
-                    -- Nhảy để kích hoạt
-                    getHumanoid():ChangeState(Enum.HumanoidStateType.Jumping)
-                    task.wait(0.5)
+                if (handle.Position - root.Position).Magnitude < 10 then
+                    moveToPosition(handle.Position)
+                    task.wait(0.2)
                 end
             end
         end
-        task.wait(2)
     end
 end
 
--- Auto Convert
-function autoConvertLoop()
-    while Settings.AutoConvert do
-        if isPollenFull() then
-            local hivePos = getHivePosition()
+local function actionAutoTokenLink()
+    if not Settings.AutoTokenLink then return end
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower():find("token") and obj.Name:lower():find("link") then
+            local root = getRootPart()
+            if (root.Position - obj.Position).Magnitude < 20 then
+                moveToPosition(obj.Position)
+                task.wait(0.5)
+                getHumanoid():ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end
+end
+
+local function actionAutoConvert()
+    if not Settings.AutoConvert then return end
+    if isPollenFull() then
+        local hivePos = getHivePosition()
+        if hivePos then
             moveToPosition(hivePos)
             task.wait(1)
-            -- CẦN CHỈNH: Kích hoạt convert (có thể cần nhấn nút)
             getHumanoid():ChangeState(Enum.HumanoidStateType.Jumping)
             task.wait(2)
-            -- Quay lại cánh đồng
             if Settings.SelectedField then
                 local fieldPos = getFieldPosition(Settings.SelectedField)
-                moveToPosition(fieldPos)
+                if fieldPos then moveToPosition(fieldPos) end
             end
         end
-        task.wait(5)
     end
 end
 
--- Auto Map Abilities
-function autoMapAbilitiesLoop()
-    while Settings.AutoMapAbilities do
-        -- Tìm các ability tokens (Tool)
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("Tool") and obj.Name:lower():find("ability") then
-                local handle = obj:FindFirstChild("Handle")
-                if handle then
-                    collectItem(handle)
+local function actionAutoMapAbilities()
+    if not Settings.AutoMapAbilities then return end
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Tool") and obj.Name:lower():find("ability") then
+            local handle = obj:FindFirstChild("Handle")
+            if handle then
+                local root = getRootPart()
+                if (root.Position - handle.Position).Magnitude < 10 then
+                    moveToPosition(handle.Position)
                     task.wait(0.3)
                 end
             end
         end
-        task.wait(3)
     end
 end
 
--- Auto Kill Monsters
-function autoKillMonstersLoop()
-    while Settings.AutoKillMonsters do
-        local monsterNames = {"Ladybug", "Rhino Beetle", "Spider", "Werewolf", "Coconut Crab"}
-        for _, name in ipairs(monsterNames) do
-            local monster = findObject(name)
-            if monster then
-                local monsterPart = monster:IsA("Model") and monster.PrimaryPart or monster
-                if monsterPart then
-                    moveToPosition(monsterPart.Position)
-                    task.wait(0.5)
-                    -- Tấn công
-                    local weapon = getCharacter():FindFirstChildOfClass("Tool")
-                    if weapon then
-                        weapon:Activate()
-                    end
-                    VirtualUser:Button1Down()
-                    task.wait(1)
-                    VirtualUser:Button1Up()
-                    task.wait(1)
-                end
+local function actionAutoKillMonsters()
+    if not Settings.AutoKillMonsters then return end
+    local monsterNames = {"Ladybug", "Rhino Beetle", "Spider", "Werewolf", "Coconut Crab"}
+    for _, name in ipairs(monsterNames) do
+        local monster = findObject(name)
+        if monster then
+            local monsterPart = monster:IsA("Model") and monster.PrimaryPart or monster
+            if monsterPart then
+                moveToPosition(monsterPart.Position)
+                task.wait(0.5)
+                local weapon = getCharacter():FindFirstChildOfClass("Tool")
+                if weapon then weapon:Activate() end
+                VirtualUser:Button1Down()
+                task.wait(0.5)
+                VirtualUser:Button1Up()
+                task.wait(1)
             end
         end
-        task.wait(5)
     end
 end
 
--- Auto Dispenser
-function autoDispenserLoop()
-    while Settings.AutoDispenser do
-        local dispenserNames = {"Blue Dispenser", "Red Dispenser", "Treat Dispenser", "Glue Dispenser", "Coconut Dispenser"}
-        for _, dispName in ipairs(dispenserNames) do
-            local disp = findObject(dispName)
-            if disp then
-                local dispPart = disp:IsA("Model") and disp.PrimaryPart or disp
-                if dispPart then
-                    moveToPosition(dispPart.Position)
-                    task.wait(0.5)
-                    getHumanoid():ChangeState(Enum.HumanoidStateType.Jumping)
-                    task.wait(0.5)
-                end
+local function actionAutoDispenser()
+    if not Settings.AutoDispenser then return end
+    local dispenserNames = {"Blue Dispenser", "Red Dispenser", "Treat Dispenser", "Glue Dispenser", "Coconut Dispenser"}
+    for _, dispName in ipairs(dispenserNames) do
+        local disp = findObject(dispName)
+        if disp then
+            local dispPart = disp:IsA("Model") and disp.PrimaryPart or disp
+            if dispPart then
+                moveToPosition(dispPart.Position)
+                task.wait(0.5)
+                getHumanoid():ChangeState(Enum.HumanoidStateType.Jumping)
+                task.wait(0.5)
             end
         end
-        task.wait(60)
     end
 end
 
--- Auto Field Boosters
-function autoFieldBoostersLoop()
-    while Settings.AutoFieldBoosters do
-        local boosterNames = {"Mountain Top Booster", "Blue HQ Booster", "Red HQ Booster"}
-        for _, bName in ipairs(boosterNames) do
-            local booster = findObject(bName)
-            if booster then
-                local boosterPart = booster:IsA("Model") and booster.PrimaryPart or booster
-                if boosterPart then
-                    moveToPosition(boosterPart.Position)
-                    task.wait(0.5)
-                    getHumanoid():ChangeState(Enum.HumanoidStateType.Jumping)
-                    task.wait(0.5)
-                end
+local function actionAutoFieldBoosters()
+    if not Settings.AutoFieldBoosters then return end
+    local boosterNames = {"Mountain Top Booster", "Blue HQ Booster", "Red HQ Booster"}
+    for _, bName in ipairs(boosterNames) do
+        local booster = findObject(bName)
+        if booster then
+            local boosterPart = booster:IsA("Model") and booster.PrimaryPart or booster
+            if boosterPart then
+                moveToPosition(boosterPart.Position)
+                task.wait(0.5)
+                getHumanoid():ChangeState(Enum.HumanoidStateType.Jumping)
+                task.wait(0.5)
             end
         end
-        task.wait(120)
     end
 end
 
--- ==================== AUTO RECONNECT ====================
+-- ==================== VÒNG LẶP TRUNG TÂM ====================
+local function centralLoop()
+    while true do
+        -- Thực hiện các hành động, mỗi hành động có kiểm tra cờ
+        actionAutoFarm()
+        actionAutoCollect()
+        actionAutoTokenLink()
+        actionAutoConvert()
+        actionAutoMapAbilities()
+        actionAutoKillMonsters()
+        actionAutoDispenser()
+        actionAutoFieldBoosters()
+        task.wait() -- quan trọng để không crash
+    end
+end
+
+-- ==================== KHỞI ĐỘNG ====================
+task.spawn(centralLoop)
+
+-- Auto Reconnect
 task.spawn(function()
     while true do
         if not LocalPlayer:IsConnected() then
-            warn("Mất kết nối! Thử kết nối lại...")
-            local TeleportService = game:GetService("TeleportService")
-            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            warn("Mất kết nối! Thử lại...")
+            game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
             task.wait(10)
         end
         task.wait(5)
     end
 end)
 
--- ==================== KHỞI TẠO ====================
+-- Thông báo
 Rayfield:Notify({
     Title = "Atlas Hub",
-    Content = "Script đã sẵn sàng!",
+    Content = "Script đã chạy! Hãy bật các tính năng từ menu.",
     Duration = 5,
     Image = 4483362458,
 })
