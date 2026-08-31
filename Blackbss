@@ -1,7 +1,7 @@
 -- [ BỘ LỌC NGẮT SCRIPT CŨ ]
 if _G.BSS_AutoFarm_Running then
     _G.BSS_AutoFarm_Running = false
-    task.wait(0.5) -- Đợi nửa giây để các vòng lặp cũ dừng hẳn
+    task.wait(0.5)
 end
 _G.BSS_AutoFarm_Running = true
 
@@ -15,21 +15,20 @@ player.Idled:Connect(function()
     virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- [ XÓA GIAO DIỆN CŨ NẾU CÓ ]
+-- [ XÓA GIAO DIỆN CŨ ]
 local coreGui = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or player:WaitForChild("PlayerGui")
-if coreGui:FindFirstChild("DeltaBSSAutoFarmV6") then
-    coreGui:FindFirstChild("DeltaBSSAutoFarmV6"):Destroy()
+if coreGui:FindFirstChild("DeltaBSSAutoFarmV7") then
+    coreGui:FindFirstChild("DeltaBSSAutoFarmV7"):Destroy()
 end
 
 -- [ TẠO GIAO DIỆN MỚI ]
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = coreGui
-ScreenGui.Name = "DeltaBSSAutoFarmV6"
+ScreenGui.Name = "DeltaBSSAutoFarmV7"
 
--- Khung Menu Chính
 local Frame = Instance.new("Frame")
 Frame.Parent = ScreenGui
-Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 Frame.Position = UDim2.new(0.5, -100, 0.2, 0)
 Frame.Size = UDim2.new(0, 200, 0, 275)
 Frame.Active = true
@@ -38,30 +37,29 @@ Frame.Draggable = true
 local Title = Instance.new("TextLabel")
 Title.Parent = Frame
 Title.Size = UDim2.new(1, 0, 0, 40)
-Title.Text = "BSS 1:1 V6 (WALK)"
-Title.TextColor3 = Color3.fromRGB(255, 150, 0)
+Title.Text = "BSS 1:1 V7 (GHIM & TỐC)"
+Title.TextColor3 = Color3.fromRGB(255, 100, 100)
 Title.BackgroundTransparency = 1
 Title.Font = Enum.Font.SourceSansBold
-Title.TextSize = 22
+Title.TextSize = 20
 
--- Nút Mở Lại Menu (Nút nhỏ khi thu nhỏ)
 local OpenMenuBtn = Instance.new("TextButton")
 OpenMenuBtn.Parent = ScreenGui
 OpenMenuBtn.Size = UDim2.new(0, 100, 0, 40)
-OpenMenuBtn.Position = UDim2.new(0, 10, 0.5, -20) -- Nằm ở mép trái màn hình
+OpenMenuBtn.Position = UDim2.new(0, 10, 0.5, -20)
 OpenMenuBtn.Text = "Mở Menu"
 OpenMenuBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
 OpenMenuBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 OpenMenuBtn.Font = Enum.Font.SourceSansBold
 OpenMenuBtn.TextSize = 16
-OpenMenuBtn.Visible = false -- Ẩn lúc ban đầu
+OpenMenuBtn.Visible = false 
 
 local function createButton(btn, yPos, text)
     btn.Parent = Frame
     btn.Size = UDim2.new(0.9, 0, 0, 40)
     btn.Position = UDim2.new(0.05, 0, 0, yPos)
     btn.Text = text
-    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Font = Enum.Font.SourceSansBold
     btn.TextSize = 16
@@ -78,7 +76,7 @@ createButton(CollectBtn, 90, "Đi Bộ Nhặt: TẮT")
 createButton(SaveHiveBtn, 135, "Lưu Vị Trí Tổ")
 createButton(HiveBtn, 180, "Về Tổ Đổi Mật")
 createButton(MinimizeBtn, 225, "Thu Nhỏ Menu")
-MinimizeBtn.BackgroundColor3 = Color3.fromRGB(180, 80, 40)
+MinimizeBtn.BackgroundColor3 = Color3.fromRGB(150, 60, 30)
 
 -- [ CÁC BIẾN HOẠT ĐỘNG ]
 local autoFarm = false
@@ -88,13 +86,13 @@ local myHiveCFrame = nil
 FarmBtn.MouseButton1Click:Connect(function()
     autoFarm = not autoFarm
     FarmBtn.Text = autoFarm and "Farm Ngầm: BẬT" or "Farm Ngầm: TẮT"
-    FarmBtn.BackgroundColor3 = autoFarm and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(50, 50, 50)
+    FarmBtn.BackgroundColor3 = autoFarm and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(45, 45, 45)
 end)
 
 CollectBtn.MouseButton1Click:Connect(function()
     autoCollect = not autoCollect
     CollectBtn.Text = autoCollect and "Đi Bộ Nhặt: BẬT" or "Đi Bộ Nhặt: TẮT"
-    CollectBtn.BackgroundColor3 = autoCollect and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(50, 50, 50)
+    CollectBtn.BackgroundColor3 = autoCollect and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(45, 45, 45)
 end)
 
 SaveHiveBtn.MouseButton1Click:Connect(function()
@@ -104,7 +102,7 @@ SaveHiveBtn.MouseButton1Click:Connect(function()
         SaveHiveBtn.BackgroundColor3 = Color3.fromRGB(180, 120, 30)
         task.wait(1)
         SaveHiveBtn.Text = "Lưu Vị Trí Tổ"
-        SaveHiveBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        SaveHiveBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     end
 end)
 
@@ -115,13 +113,11 @@ HiveBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Nút Thu Nhỏ (Ẩn bảng to, hiện nút nhỏ)
 MinimizeBtn.MouseButton1Click:Connect(function()
     Frame.Visible = false
     OpenMenuBtn.Visible = true
 end)
 
--- Nút Mở Lại Menu (Ẩn nút nhỏ, hiện bảng to)
 OpenMenuBtn.MouseButton1Click:Connect(function()
     Frame.Visible = true
     OpenMenuBtn.Visible = false
@@ -150,39 +146,64 @@ task.spawn(function()
     end
 end)
 
--- [ LOGIC 2: ĐI BỘ NHẶT KỸ NĂNG ]
+-- [ LOGIC 2: GHIM MỤC TIÊU VÀ TĂNG TỐC ĐỘ NHẶT ]
+local currentTarget = nil
+
 task.spawn(function()
     while _G.BSS_AutoFarm_Running do
-        task.wait(0.15)
-        if autoCollect then
-            local char = player.Character
-            if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
-                local root = char.HumanoidRootPart
-                local humanoid = char.Humanoid
+        task.wait(0.05) -- Tốc độ phản hồi cực nhanh
+        
+        local char = player.Character
+        if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
+            local root = char.HumanoidRootPart
+            local humanoid = char.Humanoid
+            
+            if autoCollect then
+                -- Tăng tốc độ chạy lên 40 (nhanh như chớp)
+                humanoid.WalkSpeed = 40 
                 
-                local nearestToken = nil
-                local shortestDistance = 60 -- Quét token trong phạm vi 60 mét
-
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    if obj:IsA("BasePart") then
-                        local name = obj.Name:lower()
-                        local parentName = obj.Parent and obj.Parent.Name:lower() or ""
-                        
-                        if name:match("token") or name:match("drop") or name:match("coin") or name == "c" or parentName:match("collectible") then
-                            local dist = (obj.Position - root.Position).Magnitude
-                            
-                            if dist <= shortestDistance then
-                                shortestDistance = dist
-                                nearestToken = obj
+                -- NẾU ĐÃ CÓ MỤC TIÊU GHIM
+                if currentTarget and currentTarget.Parent then
+                    local distance = (currentTarget.Position - root.Position).Magnitude
+                    
+                    if distance <= 4 then
+                        -- Đã ăn được kỹ năng (đến rất gần), bỏ ghim để đi tìm cái mới
+                        currentTarget = nil
+                    elseif distance > 60 then
+                        -- Kỹ năng bay ra khỏi vườn, bỏ ghim
+                        currentTarget = nil
+                    else
+                        -- Tiếp tục chạy cắm đầu vào mục tiêu
+                        humanoid:MoveTo(currentTarget.Position)
+                    end
+                else
+                    -- CHỈ QUÉT BẢN ĐỒ KHI ĐÃ ĂN XONG (Chống giật lag)
+                    local shortestDistance = 60
+                    local tempTarget = nil
+                    
+                    for _, obj in ipairs(workspace:GetDescendants()) do
+                        if obj:IsA("BasePart") then
+                            local name = obj.Name:lower()
+                            if name:match("token") or name:match("drop") or name:match("coin") or name == "c" then
+                                local dist = (obj.Position - root.Position).Magnitude
+                                if dist <= shortestDistance then
+                                    shortestDistance = dist
+                                    tempTarget = obj
+                                end
                             end
                         end
                     end
+                    
+                    -- Tìm thấy kỹ năng -> Ghim nó lại ngay
+                    if tempTarget then
+                        currentTarget = tempTarget
+                        humanoid:MoveTo(currentTarget.Position)
+                    end
                 end
-                
-                -- Ra lệnh cho nhân vật ĐI BỘ tới vị trí token (Tuyệt đối không dùng CFrame)
-                if nearestToken then
-                    humanoid:MoveTo(nearestToken.Position)
-                end
+            else
+                -- Khi tắt tính năng nhặt, trả lại tốc độ đi bộ bình thường (16) và xóa ghim
+                currentTarget = nil
+                humanoid.WalkSpeed = 16
             end
         end
     end
