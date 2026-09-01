@@ -5,42 +5,68 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
+-- === CÁC TÙY CHỈNH (SETTINGS) ===
 local isAiming = false
-local SMOOTHNESS = 0.5 -- Tăng số này lên (tối đa 1) để camera ghim chặt/nhanh hơn khi bắn
-local TARGET_PART = "Head" 
+local SMOOTHNESS = 0.5       -- Tốc độ lia camera (0.1 đến 1)
+local TARGET_PART = "Head"   -- Bộ phận ngắm vào
+local FOV_RADIUS = 120       -- Bán kính của vòng tròn FOV (Chỉnh to nhỏ tùy ý)
+local FOV_COLOR = Color3.fromRGB(255, 0, 0) -- Màu của vòng tròn (Đang là màu đỏ)
 
--- 1. HÀM KIỂM TRA XUYÊN TƯỜNG (RAYCASTING)
+-- === 1. TẠO VÒNG TRÒN FOV TRÊN MÀN HÌNH ===
+-- Xác định nơi đặt UI (Hỗ trợ cả Roblox Studio lẫn phần mềm chạy Script)
+local uiParent = pcall(function() return game:GetService("CoreGui").Name end) and game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+
+-- Xóa vòng tròn cũ nếu bạn chạy lại script nhiều lần
+if uiParent:FindFirstChild("AimbotFOV_UI") then
+    uiParent.AimbotFOV_UI:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AimbotFOV_UI"
+screenGui.Parent = uiParent
+
+local fovCircle = Instance.new("Frame")
+fovCircle.Size = UDim2.new(0, FOV_RADIUS * 2, 0, FOV_RADIUS * 2)
+fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+fovCircle.AnchorPoint = Vector2.new(0.5, 0.5) -- Đưa tâm frame vào giữa màn hình
+fovCircle.BackgroundTransparency = 1 -- Làm trong suốt nền
+fovCircle.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(1, 0) -- Bo tròn thành hình tròn hoàn hảo
+uiCorner.Parent = fovCircle
+
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Color = FOV_COLOR
+uiStroke.Thickness = 1.5 -- Độ dày viền
+uiStroke.Parent = fovCircle
+
+-- === 2. HÀM KIỂM TRA XUYÊN TƯỜNG ===
 local function hasLineOfSight(targetCharacter)
     local origin = Camera.CFrame.Position
     local targetPos = targetCharacter[TARGET_PART].Position
-    local direction = (targetPos - origin) -- Hướng và khoảng cách từ Camera đến địch
+    local direction = (targetPos - origin)
     
     local raycastParams = RaycastParams.new()
     raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-    
-    -- Bỏ qua bản thân người chơi để tia chiếu không bị chặn bởi chính mình
     if LocalPlayer.Character then
         raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
     end
     
-    -- Phóng một tia từ Camera đến vị trí kẻ địch
     local raycastResult = workspace:Raycast(origin, direction, raycastParams)
     
-    -- Nếu tia chiếu va chạm vào một vật thể
     if raycastResult then
-        -- Kiểm tra xem vật thể bị chạm có phải là một bộ phận của kẻ địch không
         if raycastResult.Instance:IsDescendantOf(targetCharacter) then
-            return true -- Nhìn thấy rõ địch, không có tường
+            return true
         else
-            return false -- Tia bị chặn bởi tường hoặc vật cản khác
+            return false
         end
     end
-    
     return true
 end
 
--- 2. HÀM TÌM ĐỊCH GẦN TÂM NHẤT (CÓ LỌC TƯỜNG)
-local function getClosestPlayerToCenter()
+-- === 3. TÌM ĐỊCH TRONG VÒNG TRÒN FOV ===
+local function getClosestPlayerInFOV()
     local closestCharacter = nil
     local shortestDistance = math.huge
     local viewportCenter = Camera.ViewportSize / 2
@@ -55,14 +81,17 @@ local function getClosestPlayerToCenter()
                     local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
 
                     if onScreen then
-                        -- CHỈ TIẾP TỤC NẾU KẺ ĐỊCH KHÔNG BỊ TƯỜNG CHE
-                        if hasLineOfSight(character) then
-                            local screenPosVector2 = Vector2.new(screenPos.X, screenPos.Y)
-                            local distanceFromCenter = (screenPosVector2 - centerVector2).Magnitude
+                        local screenPosVector2 = Vector2.new(screenPos.X, screenPos.Y)
+                        local distanceFromCenter = (screenPosVector2 - centerVector2).Magnitude
 
-                            if distanceFromCenter < shortestDistance then
-                                shortestDistance = distanceFromCenter
-                                closestCharacter = character
+                        -- ĐIỀU KIỆN MỚI: Kẻ địch phải nằm trong bán kính của vòng tròn FOV
+                        if distanceFromCenter <= FOV_RADIUS then
+                            -- Tiếp tục kiểm tra xem có bị khuất tường không
+                            if hasLineOfSight(character) then
+                                if distanceFromCenter < shortestDistance then
+                                    shortestDistance = distanceFromCenter
+                                    closestCharacter = character
+                                end
                             end
                         end
                     end
@@ -73,9 +102,9 @@ local function getClosestPlayerToCenter()
     return closestCharacter
 end
 
--- 3. ĐIỀU KHIỂN KHI BẤM NÚT BẮN (TƯƠNG THÍCH MOBILE)
--- Lưu ý: Không dùng 'gameProcessed' để script vẫn nhận diện khi bạn bấm vào nút bắn (UI) trên màn hình
+-- === 4. BẬT/TẮT KHI BẤM NÚT BẮN ===
 UserInputService.InputBegan:Connect(function(input)
+    -- Nhận diện chạm màn hình (mobile) hoặc click chuột trái
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         isAiming = true
     end
@@ -87,10 +116,10 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- 4. GHIM CAMERA MƯỢT MÀ
+-- === 5. CHẠY AIMBOT MỖI KHUNG HÌNH ===
 RunService.RenderStepped:Connect(function()
     if isAiming then
-        local targetCharacter = getClosestPlayerToCenter()
+        local targetCharacter = getClosestPlayerInFOV()
         if targetCharacter and targetCharacter:FindFirstChild(TARGET_PART) then
             local targetPosition = targetCharacter[TARGET_PART].Position
             local targetCFrame = CFrame.new(Camera.CFrame.Position, targetPosition)
