@@ -6,82 +6,95 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
 local isAiming = false
-local SMOOTHNESS = 0.15 -- Từ 0.01 đến 1 (Càng nhỏ camera xoay càng mượt/chậm)
-local TARGET_PART = "Head" -- Có thể đổi thành "HumanoidRootPart"
+local SMOOTHNESS = 0.5 -- Tăng số này lên (tối đa 1) để camera ghim chặt/nhanh hơn khi bắn
+local TARGET_PART = "Head" 
 
--- Hàm tìm kẻ địch gần tâm màn hình nhất
+-- 1. HÀM KIỂM TRA XUYÊN TƯỜNG (RAYCASTING)
+local function hasLineOfSight(targetCharacter)
+    local origin = Camera.CFrame.Position
+    local targetPos = targetCharacter[TARGET_PART].Position
+    local direction = (targetPos - origin) -- Hướng và khoảng cách từ Camera đến địch
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    
+    -- Bỏ qua bản thân người chơi để tia chiếu không bị chặn bởi chính mình
+    if LocalPlayer.Character then
+        raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    end
+    
+    -- Phóng một tia từ Camera đến vị trí kẻ địch
+    local raycastResult = workspace:Raycast(origin, direction, raycastParams)
+    
+    -- Nếu tia chiếu va chạm vào một vật thể
+    if raycastResult then
+        -- Kiểm tra xem vật thể bị chạm có phải là một bộ phận của kẻ địch không
+        if raycastResult.Instance:IsDescendantOf(targetCharacter) then
+            return true -- Nhìn thấy rõ địch, không có tường
+        else
+            return false -- Tia bị chặn bởi tường hoặc vật cản khác
+        end
+    end
+    
+    return true
+end
+
+-- 2. HÀM TÌM ĐỊCH GẦN TÂM NHẤT (CÓ LỌC TƯỜNG)
 local function getClosestPlayerToCenter()
     local closestCharacter = nil
     local shortestDistance = math.huge
-    
-    -- Lấy tâm màn hình
     local viewportCenter = Camera.ViewportSize / 2
     local centerVector2 = Vector2.new(viewportCenter.X, viewportCenter.Y)
 
     for _, player in ipairs(Players:GetPlayers()) do
-        -- Bỏ qua bản thân người chơi
         if player ~= LocalPlayer then
             local character = player.Character
-            
-            -- Kiểm tra nhân vật tồn tại, có bộ phận mục tiêu và có Humanoid
             if character and character:FindFirstChild(TARGET_PART) and character:FindFirstChild("Humanoid") then
-                -- Điều kiện 4: Chỉ khóa nếu mục tiêu còn sống
                 if character.Humanoid.Health > 0 then
                     local targetPart = character[TARGET_PART]
-                    
-                    -- Chuyển đổi tọa độ 3D của mục tiêu thành 2D trên màn hình
                     local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
 
-                    -- Chỉ xét các mục tiêu đang hiển thị trên màn hình
                     if onScreen then
-                        local screenPosVector2 = Vector2.new(screenPos.X, screenPos.Y)
-                        
-                        -- Tính khoảng cách từ tâm màn hình đến mục tiêu
-                        local distanceFromCenter = (screenPosVector2 - centerVector2).Magnitude
+                        -- CHỈ TIẾP TỤC NẾU KẺ ĐỊCH KHÔNG BỊ TƯỜNG CHE
+                        if hasLineOfSight(character) then
+                            local screenPosVector2 = Vector2.new(screenPos.X, screenPos.Y)
+                            local distanceFromCenter = (screenPosVector2 - centerVector2).Magnitude
 
-                        -- Cập nhật mục tiêu gần nhất
-                        if distanceFromCenter < shortestDistance then
-                            shortestDistance = distanceFromCenter
-                            closestCharacter = character
+                            if distanceFromCenter < shortestDistance then
+                                shortestDistance = distanceFromCenter
+                                closestCharacter = character
+                            end
                         end
                     end
                 end
             end
         end
     end
-
     return closestCharacter
 end
 
--- Lắng nghe sự kiện khi người dùng giữ chuột phải (MouseButton2)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+-- 3. ĐIỀU KHIỂN KHI BẤM NÚT BẮN (TƯƠNG THÍCH MOBILE)
+-- Lưu ý: Không dùng 'gameProcessed' để script vẫn nhận diện khi bạn bấm vào nút bắn (UI) trên màn hình
+UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         isAiming = true
     end
 end)
 
--- Lắng nghe sự kiện khi người dùng nhả chuột phải
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         isAiming = false
     end
 end)
 
--- Cập nhật camera mỗi khung hình (Frame)
+-- 4. GHIM CAMERA MƯỢT MÀ
 RunService.RenderStepped:Connect(function()
     if isAiming then
         local targetCharacter = getClosestPlayerToCenter()
-        
         if targetCharacter and targetCharacter:FindFirstChild(TARGET_PART) then
             local targetPosition = targetCharacter[TARGET_PART].Position
-            
-            -- Tạo CFrame mới cho Camera: Giữ nguyên vị trí hiện tại, chỉ hướng mặt về phía mục tiêu
             local targetCFrame = CFrame.new(Camera.CFrame.Position, targetPosition)
-            
-            -- Dùng hàm Lerp để nội suy mượt mà từ góc nhìn hiện tại sang góc nhìn mục tiêu
             Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, SMOOTHNESS)
         end
     end
 end)
-
