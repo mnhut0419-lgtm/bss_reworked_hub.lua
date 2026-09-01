@@ -1,129 +1,547 @@
+--[[
+    CAMERA AIM ASSIST
+    Vị trí: StarterPlayer > StarterPlayerScripts > LocalScript
+
+    Hỗ trợ:
+    - Người chơi khác
+    - NPC nằm trực tiếp trong Workspace.NPCs
+    - Chuột phải, phím E, tay cầm L2
+    - Nút cảm ứng trên điện thoại
+    - FOV, kiểm tra tường và làm mượt camera
+]]
+
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local ContextActionService = game:GetService("ContextActionService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- === CÁC TÙY CHỈNH (SETTINGS) ===
+--==================================================
+-- CẤU HÌNH
+--==================================================
+
+local CONFIG = {
+    Enabled = true,
+
+    -- Nên dùng HumanoidRootPart để hỗ trợ ngắm vào giữa cơ thể.
+    -- Có thể đổi thành "Head".
+    TargetPartName = "HumanoidRootPart",
+    FallbackTargetPartName = "Head",
+
+    -- Số càng cao thì camera bắt mục tiêu càng nhanh.
+    -- Gợi ý: 6–10 nhẹ, 10–16 vừa, trên 16 khá mạnh.
+    Sensitivity = 10,
+
+    -- Bán kính tìm mục tiêu tính bằng pixel trên màn hình.
+    FOV_Radius = 150,
+
+    -- Không chọn mục tiêu xa hơn số stud này.
+    MaxDistance = 600,
+
+    -- Khoảng thời gian giữa hai lần tìm mục tiêu.
+    -- 0.05 tương đương khoảng 20 lần quét/giây.
+    ScanInterval = 0.05,
+
+    -- Không nhắm người cùng Team.
+    -- Tắt nếu game là FFA.
+    TeamCheck = true,
+
+    -- NPC phải là Model nằm trực tiếp trong Workspace.NPCs.
+    NPCFolderName = "NPCs",
+
+    -- false: tính FOV từ tâm màn hình.
+    -- true: tính FOV từ vị trí con trỏ chuột.
+    UseMousePosition = false,
+
+    -- Giữ mục tiêu hiện tại đến khi chết, ra ngoài FOV hoặc bị che.
+    StickyTarget = true,
+
+    -- Hiện vòng tròn FOV.
+    ShowFOV = true,
+    FOVOnlyWhileAiming = true,
+
+    -- Tự tạo nút "NGẮM" trên điện thoại.
+    CreateTouchButton = true,
+
+    -- Điều chỉnh điểm ngắm cao hoặc thấp hơn bộ phận mục tiêu.
+    AimOffset = Vector3.zero,
+}
+
+local ACTION_NAME = "CameraAimAssistHold"
+local RENDER_NAME = "CameraAimAssistRender"
+
+local currentCamera = Workspace.CurrentCamera
 local isAiming = false
-local SMOOTHNESS = 0.5       -- Tốc độ lia camera (0.1 đến 1)
-local TARGET_PART = "Head"   -- Bộ phận ngắm vào
-local FOV_RADIUS = 120       -- Bán kính của vòng tròn FOV (Chỉnh to nhỏ tùy ý)
-local FOV_COLOR = Color3.fromRGB(255, 0, 0) -- Màu của vòng tròn (Đang là màu đỏ)
+local lockedModel = nil
+local lockedPart = nil
+local scanTimer = CONFIG.ScanInterval
 
--- === 1. TẠO VÒNG TRÒN FOV TRÊN MÀN HÌNH ===
--- Xác định nơi đặt UI (Hỗ trợ cả Roblox Studio lẫn phần mềm chạy Script)
-local uiParent = pcall(function() return game:GetService("CoreGui").Name end) and game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+--==================================================
+-- RAYCAST
+--==================================================
 
--- Xóa vòng tròn cũ nếu bạn chạy lại script nhiều lần
-if uiParent:FindFirstChild("AimbotFOV_UI") then
-    uiParent.AimbotFOV_UI:Destroy()
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+raycastParams.IgnoreWater = true
+
+-- Loại nhân vật bản thân và viewmodel trong Camera khỏi raycast.
+local function refreshRaycastFilter()
+    local ignoreList = {}
+
+    if LocalPlayer.Character then
+        table.insert(ignoreList, LocalPlayer.Character)
+    end
+
+    if currentCamera then
+        table.insert(ignoreList, currentCamera)
+    end
+
+    raycastParams.FilterDescendantsInstances = ignoreList
 end
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AimbotFOV_UI"
-screenGui.Parent = uiParent
+refreshRaycastFilter()
+
+local characterConnection = LocalPlayer.CharacterAdded:Connect(function()
+    task.defer(refreshRaycastFilter)
+end)
+
+local cameraConnection =
+    Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+        currentCamera = Workspace.CurrentCamera
+        refreshRaycastFilter()
+    end)
+
+-- Kiểm tra đường từ camera tới mục tiêu.
+local function hasLineOfSight(targetModel, targetPart)
+    if not currentCamera then
+        return false
+    end
+
+    local origin = currentCamera.CFrame.Position
+    local direction = targetPart.Position - origin
+
+    if direction.Magnitude < 0.01 then
+        return true
+    end
+
+    local result = Workspace:Raycast(
+        origin,
+        direction,
+        raycastParams
+    )
+
+    -- Không đụng vật gì, hoặc vật đầu tiên thuộc mục tiêu.
+    return result == nil
+        or result.Instance:IsDescendantOf(targetModel)
+end
+
+--==================================================
+-- FOV TRÊN MÀN HÌNH
+--==================================================
+
+local oldGui = PlayerGui:FindFirstChild("AimAssistUI")
+if oldGui then
+    oldGui:Destroy()
+end
+
+local fovGui = Instance.new("ScreenGui")
+fovGui.Name = "AimAssistUI"
+fovGui.ResetOnSpawn = false
+fovGui.IgnoreGuiInset = true
+fovGui.DisplayOrder = 20
+fovGui.Parent = PlayerGui
 
 local fovCircle = Instance.new("Frame")
-fovCircle.Size = UDim2.new(0, FOV_RADIUS * 2, 0, FOV_RADIUS * 2)
-fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
-fovCircle.AnchorPoint = Vector2.new(0.5, 0.5) -- Đưa tâm frame vào giữa màn hình
-fovCircle.BackgroundTransparency = 1 -- Làm trong suốt nền
-fovCircle.Parent = screenGui
+fovCircle.Name = "FOVCircle"
+fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+fovCircle.Size = UDim2.fromOffset(
+    CONFIG.FOV_Radius * 2,
+    CONFIG.FOV_Radius * 2
+)
+fovCircle.BackgroundTransparency = 1
+fovCircle.Visible = CONFIG.ShowFOV
+fovCircle.ZIndex = 10
+fovCircle.Parent = fovGui
 
-local uiCorner = Instance.new("UICorner")
-uiCorner.CornerRadius = UDim.new(1, 0) -- Bo tròn thành hình tròn hoàn hảo
-uiCorner.Parent = fovCircle
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(1, 0)
+corner.Parent = fovCircle
 
-local uiStroke = Instance.new("UIStroke")
-uiStroke.Color = FOV_COLOR
-uiStroke.Thickness = 1.5 -- Độ dày viền
-uiStroke.Parent = fovCircle
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(255, 255, 255)
+stroke.Thickness = 1.5
+stroke.Transparency = 0.35
+stroke.Parent = fovCircle
 
--- === 2. HÀM KIỂM TRA XUYÊN TƯỜNG ===
-local function hasLineOfSight(targetCharacter)
-    local origin = Camera.CFrame.Position
-    local targetPos = targetCharacter[TARGET_PART].Position
-    local direction = (targetPos - origin)
-    
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-    if LocalPlayer.Character then
-        raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+-- Tọa độ dùng cùng WorldToViewportPoint.
+local function getAimViewportPoint()
+    if not currentCamera then
+        return Vector2.zero
     end
-    
-    local raycastResult = workspace:Raycast(origin, direction, raycastParams)
-    
-    if raycastResult then
-        if raycastResult.Instance:IsDescendantOf(targetCharacter) then
-            return true
-        else
-            return false
-        end
+
+    if CONFIG.UseMousePosition then
+        local topLeftInset = GuiService:GetGuiInset()
+        return UserInputService:GetMouseLocation() - topLeftInset
     end
-    return true
+
+    return currentCamera.ViewportSize * 0.5
 end
 
--- === 3. TÌM ĐỊCH TRONG VÒNG TRÒN FOV ===
-local function getClosestPlayerInFOV()
-    local closestCharacter = nil
-    local shortestDistance = math.huge
-    local viewportCenter = Camera.ViewportSize / 2
-    local centerVector2 = Vector2.new(viewportCenter.X, viewportCenter.Y)
+local function updateFOVCircle()
+    if not CONFIG.ShowFOV then
+        fovCircle.Visible = false
+        return
+    end
 
+    fovCircle.Visible =
+        not CONFIG.FOVOnlyWhileAiming or isAiming
+
+    if CONFIG.UseMousePosition then
+        -- GUI bỏ qua inset nên dùng vị trí chuột chưa trừ inset.
+        local mousePosition = UserInputService:GetMouseLocation()
+        fovCircle.Position = UDim2.fromOffset(
+            mousePosition.X,
+            mousePosition.Y
+        )
+    else
+        fovCircle.Position = UDim2.fromScale(0.5, 0.5)
+    end
+end
+
+--==================================================
+-- KIỂM TRA VÀ ĐÁNH GIÁ MỤC TIÊU
+--==================================================
+
+local function isFriendly(targetModel)
+    local owner = Players:GetPlayerFromCharacter(targetModel)
+
+    if owner == LocalPlayer then
+        return true
+    end
+
+    if CONFIG.TeamCheck
+        and owner
+        and LocalPlayer.Team ~= nil
+        and owner.Team == LocalPlayer.Team
+    then
+        return true
+    end
+
+    -- Có thể gắn Attribute Friendly = true cho NPC đồng minh.
+    if targetModel:GetAttribute("Friendly") == true then
+        return true
+    end
+
+    return false
+end
+
+local function getTargetPart(targetModel)
+    if not targetModel
+        or not targetModel:IsA("Model")
+        or not targetModel:IsDescendantOf(Workspace)
+    then
+        return nil
+    end
+
+    if targetModel:GetAttribute("AimAssistDisabled") == true then
+        return nil
+    end
+
+    local humanoid = targetModel:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then
+        return nil
+    end
+
+    local targetPart =
+        targetModel:FindFirstChild(CONFIG.TargetPartName)
+
+    if targetPart and targetPart:IsA("BasePart") then
+        return targetPart
+    end
+
+    local fallbackPart =
+        targetModel:FindFirstChild(CONFIG.FallbackTargetPartName)
+
+    if fallbackPart and fallbackPart:IsA("BasePart") then
+        return fallbackPart
+    end
+
+    return nil
+end
+
+-- Trả về bộ phận, khoảng cách trên màn hình và khoảng cách thế giới.
+local function evaluateTarget(targetModel, aimPoint)
+    if not currentCamera or isFriendly(targetModel) then
+        return nil
+    end
+
+    local targetPart = getTargetPart(targetModel)
+    if not targetPart then
+        return nil
+    end
+
+    local worldDistance =
+        (targetPart.Position - currentCamera.CFrame.Position).Magnitude
+
+    if worldDistance > CONFIG.MaxDistance then
+        return nil
+    end
+
+    local screenPoint, onScreen =
+        currentCamera:WorldToViewportPoint(targetPart.Position)
+
+    if not onScreen or screenPoint.Z <= 0 then
+        return nil
+    end
+
+    local targetScreenPosition =
+        Vector2.new(screenPoint.X, screenPoint.Y)
+
+    local screenDistance =
+        (targetScreenPosition - aimPoint).Magnitude
+
+    if screenDistance > CONFIG.FOV_Radius then
+        return nil
+    end
+
+    return targetPart, screenDistance, worldDistance
+end
+
+local function addCandidate(
+    targetModel,
+    aimPoint,
+    seenModels,
+    candidateList
+)
+    if seenModels[targetModel] then
+        return
+    end
+
+    seenModels[targetModel] = true
+
+    local targetPart, screenDistance, worldDistance =
+        evaluateTarget(targetModel, aimPoint)
+
+    if not targetPart then
+        return
+    end
+
+    table.insert(candidateList, {
+        Model = targetModel,
+        Part = targetPart,
+        ScreenDistance = screenDistance,
+        WorldDistance = worldDistance,
+    })
+end
+
+local function findBestTarget(aimPoint)
+    local candidates = {}
+    local seenModels = {}
+
+    -- Thêm nhân vật của các Player.
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local character = player.Character
-            if character and character:FindFirstChild(TARGET_PART) and character:FindFirstChild("Humanoid") then
-                if character.Humanoid.Health > 0 then
-                    local targetPart = character[TARGET_PART]
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+        if player ~= LocalPlayer and player.Character then
+            addCandidate(
+                player.Character,
+                aimPoint,
+                seenModels,
+                candidates
+            )
+        end
+    end
 
-                    if onScreen then
-                        local screenPosVector2 = Vector2.new(screenPos.X, screenPos.Y)
-                        local distanceFromCenter = (screenPosVector2 - centerVector2).Magnitude
+    -- Thêm NPC trong Workspace.NPCs.
+    local npcFolder =
+        Workspace:FindFirstChild(CONFIG.NPCFolderName)
 
-                        -- ĐIỀU KIỆN MỚI: Kẻ địch phải nằm trong bán kính của vòng tròn FOV
-                        if distanceFromCenter <= FOV_RADIUS then
-                            -- Tiếp tục kiểm tra xem có bị khuất tường không
-                            if hasLineOfSight(character) then
-                                if distanceFromCenter < shortestDistance then
-                                    shortestDistance = distanceFromCenter
-                                    closestCharacter = character
-                                end
-                            end
-                        end
-                    end
-                end
+    if npcFolder then
+        for _, npc in ipairs(npcFolder:GetChildren()) do
+            if npc:IsA("Model") then
+                addCandidate(
+                    npc,
+                    aimPoint,
+                    seenModels,
+                    candidates
+                )
             end
         end
     end
-    return closestCharacter
+
+    -- Ưu tiên mục tiêu gần tâm FOV nhất.
+    table.sort(candidates, function(a, b)
+        if a.ScreenDistance == b.ScreenDistance then
+            return a.WorldDistance < b.WorldDistance
+        end
+
+        return a.ScreenDistance < b.ScreenDistance
+    end)
+
+    -- Raycast theo thứ tự; nếu mục tiêu đầu bị che,
+    -- thử mục tiêu kế tiếp.
+    for _, candidate in ipairs(candidates) do
+        if hasLineOfSight(candidate.Model, candidate.Part) then
+            return candidate.Model, candidate.Part
+        end
+    end
+
+    return nil, nil
 end
 
--- === 4. BẬT/TẮT KHI BẤM NÚT BẮN ===
-UserInputService.InputBegan:Connect(function(input)
-    -- Nhận diện chạm màn hình (mobile) hoặc click chuột trái
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        isAiming = true
+local function validateLockedTarget(aimPoint)
+    if not lockedModel then
+        return false
     end
-end)
 
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        isAiming = false
+    local targetPart = evaluateTarget(lockedModel, aimPoint)
+
+    if targetPart
+        and hasLineOfSight(lockedModel, targetPart)
+    then
+        lockedPart = targetPart
+        return true
     end
-end)
 
--- === 5. CHẠY AIMBOT MỖI KHUNG HÌNH ===
-RunService.RenderStepped:Connect(function()
-    if isAiming then
-        local targetCharacter = getClosestPlayerInFOV()
-        if targetCharacter and targetCharacter:FindFirstChild(TARGET_PART) then
-            local targetPosition = targetCharacter[TARGET_PART].Position
-            local targetCFrame = CFrame.new(Camera.CFrame.Position, targetPosition)
-            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, SMOOTHNESS)
+    lockedModel = nil
+    lockedPart = nil
+    return false
+end
+
+--==================================================
+-- INPUT: CHUỘT PHẢI / E / L2 / ĐIỆN THOẠI
+--==================================================
+
+local function handleAimAction(_, inputState)
+    if inputState == Enum.UserInputState.Begin then
+        -- Không bật aim khi người chơi đang gõ chat.
+        if UserInputService:GetFocusedTextBox() then
+            return Enum.ContextActionResult.Pass
         end
+
+        isAiming = true
+
+        -- Ép quét ngay ở frame tiếp theo.
+        scanTimer = CONFIG.ScanInterval
+    elseif inputState == Enum.UserInputState.End
+        or inputState == Enum.UserInputState.Cancel
+    then
+        isAiming = false
+        lockedModel = nil
+        lockedPart = nil
+    end
+
+    -- Không chặn hệ thống ADS hoặc input của súng.
+    return Enum.ContextActionResult.Pass
+end
+
+ContextActionService:BindAction(
+    ACTION_NAME,
+    handleAimAction,
+    CONFIG.CreateTouchButton,
+    Enum.UserInputType.MouseButton2,
+    Enum.KeyCode.E,
+    Enum.KeyCode.ButtonL2
+)
+
+if CONFIG.CreateTouchButton then
+    ContextActionService:SetTitle(ACTION_NAME, "NGẮM")
+    ContextActionService:SetDescription(
+        ACTION_NAME,
+        "Giữ để bật hỗ trợ ngắm"
+    )
+    ContextActionService:SetPosition(
+        ACTION_NAME,
+        UDim2.fromScale(0.82, 0.72)
+    )
+end
+
+--==================================================
+-- CẬP NHẬT CAMERA
+--==================================================
+
+local function onRenderStep(deltaTime)
+    currentCamera = Workspace.CurrentCamera
+    updateFOVCircle()
+
+    if not CONFIG.Enabled
+        or not isAiming
+        or not currentCamera
+    then
+        lockedModel = nil
+        lockedPart = nil
+        return
+    end
+
+    -- Không tìm và raycast tất cả mục tiêu mỗi frame.
+    scanTimer += deltaTime
+
+    if scanTimer >= CONFIG.ScanInterval then
+        scanTimer = 0
+
+        local aimPoint = getAimViewportPoint()
+        local keepCurrentTarget = false
+
+        if CONFIG.StickyTarget then
+            keepCurrentTarget =
+                validateLockedTarget(aimPoint)
+        end
+
+        if not keepCurrentTarget then
+            lockedModel, lockedPart =
+                findBestTarget(aimPoint)
+        end
+    end
+
+    if not lockedPart
+        or not lockedPart:IsDescendantOf(Workspace)
+    then
+        return
+    end
+
+    local currentCFrame = currentCamera.CFrame
+    local targetPosition =
+        lockedPart.Position + CONFIG.AimOffset
+
+    if (targetPosition - currentCFrame.Position).Magnitude < 0.01 then
+        return
+    end
+
+    local desiredCFrame = CFrame.lookAt(
+        currentCFrame.Position,
+        targetPosition,
+        currentCFrame.UpVector
+    )
+
+    -- Công thức này giúp độ mượt gần như giống nhau
+    -- ở 30, 60 hoặc 120 FPS.
+    local safeDeltaTime = math.min(deltaTime, 1 / 15)
+    local alpha = 1 - math.exp(
+        -math.max(CONFIG.Sensitivity, 0) * safeDeltaTime
+    )
+
+    currentCamera.CFrame =
+        currentCFrame:Lerp(desiredCFrame, alpha)
+end
+
+-- Chạy sau camera mặc định để CFrame không bị ghi đè.
+RunService:BindToRenderStep(
+    RENDER_NAME,
+    Enum.RenderPriority.Camera.Value + 1,
+    onRenderStep
+)
+
+-- Dọn dẹp nếu LocalScript bị xóa.
+script.Destroying:Connect(function()
+    RunService:UnbindFromRenderStep(RENDER_NAME)
+    ContextActionService:UnbindAction(ACTION_NAME)
+
+    characterConnection:Disconnect()
+    cameraConnection:Disconnect()
+
+    if fovGui then
+        fovGui:Destroy()
     end
 end)
