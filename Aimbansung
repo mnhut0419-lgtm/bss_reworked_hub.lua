@@ -1,0 +1,87 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local isAiming = false
+local SMOOTHNESS = 0.15 -- Từ 0.01 đến 1 (Càng nhỏ camera xoay càng mượt/chậm)
+local TARGET_PART = "Head" -- Có thể đổi thành "HumanoidRootPart"
+
+-- Hàm tìm kẻ địch gần tâm màn hình nhất
+local function getClosestPlayerToCenter()
+    local closestCharacter = nil
+    local shortestDistance = math.huge
+    
+    -- Lấy tâm màn hình
+    local viewportCenter = Camera.ViewportSize / 2
+    local centerVector2 = Vector2.new(viewportCenter.X, viewportCenter.Y)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        -- Bỏ qua bản thân người chơi
+        if player ~= LocalPlayer then
+            local character = player.Character
+            
+            -- Kiểm tra nhân vật tồn tại, có bộ phận mục tiêu và có Humanoid
+            if character and character:FindFirstChild(TARGET_PART) and character:FindFirstChild("Humanoid") then
+                -- Điều kiện 4: Chỉ khóa nếu mục tiêu còn sống
+                if character.Humanoid.Health > 0 then
+                    local targetPart = character[TARGET_PART]
+                    
+                    -- Chuyển đổi tọa độ 3D của mục tiêu thành 2D trên màn hình
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+
+                    -- Chỉ xét các mục tiêu đang hiển thị trên màn hình
+                    if onScreen then
+                        local screenPosVector2 = Vector2.new(screenPos.X, screenPos.Y)
+                        
+                        -- Tính khoảng cách từ tâm màn hình đến mục tiêu
+                        local distanceFromCenter = (screenPosVector2 - centerVector2).Magnitude
+
+                        -- Cập nhật mục tiêu gần nhất
+                        if distanceFromCenter < shortestDistance then
+                            shortestDistance = distanceFromCenter
+                            closestCharacter = character
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return closestCharacter
+end
+
+-- Lắng nghe sự kiện khi người dùng giữ chuột phải (MouseButton2)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isAiming = true
+    end
+end)
+
+-- Lắng nghe sự kiện khi người dùng nhả chuột phải
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isAiming = false
+    end
+end)
+
+-- Cập nhật camera mỗi khung hình (Frame)
+RunService.RenderStepped:Connect(function()
+    if isAiming then
+        local targetCharacter = getClosestPlayerToCenter()
+        
+        if targetCharacter and targetCharacter:FindFirstChild(TARGET_PART) then
+            local targetPosition = targetCharacter[TARGET_PART].Position
+            
+            -- Tạo CFrame mới cho Camera: Giữ nguyên vị trí hiện tại, chỉ hướng mặt về phía mục tiêu
+            local targetCFrame = CFrame.new(Camera.CFrame.Position, targetPosition)
+            
+            -- Dùng hàm Lerp để nội suy mượt mà từ góc nhìn hiện tại sang góc nhìn mục tiêu
+            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, SMOOTHNESS)
+        end
+    end
+end)
+
